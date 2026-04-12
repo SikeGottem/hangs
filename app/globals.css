@@ -365,6 +365,18 @@ body {
   .section-group-header {
     padding: 8px 0;
   }
+
+  /* Hide grid demo on mobile — too wide */
+  .demo-grid-card {
+    display: none !important;
+  }
+
+  /* Better tap targets for participant chips */
+  .sticky-bar .btn-primary,
+  .sticky-bar .btn-secondary {
+    font-size: 14px;
+    padding: 12px 16px;
+  }
 }
 
 /* Grid scroll hint — fade on right edge */

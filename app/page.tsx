@@ -254,15 +254,16 @@ export default function Home() {
         style={{
           display: 'flex',
           justifyContent: 'center',
-          alignItems: 'flex-start',
+          alignItems: 'stretch',
           gap: 16,
           padding: '40px 16px 48px',
           maxWidth: 600,
           margin: '0 auto',
+          flexWrap: 'wrap',
         }}
       >
-        {/* Grid demo */}
-        <div style={{
+        {/* Grid demo — hide on mobile, too wide */}
+        <div className="demo-grid-card" style={{
           padding: '20px 24px 24px',
           background: 'var(--surface)',
           borderRadius: 'var(--radius-xl)',
@@ -285,7 +286,7 @@ export default function Home() {
           display: 'flex',
           flexDirection: 'column',
           flex: 1,
-          minWidth: 0,
+          minWidth: 200,
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12 }}>
             What to do
@@ -301,7 +302,7 @@ export default function Home() {
         borderTop: '1px solid var(--border-light)',
         borderBottom: '1px solid var(--border-light)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 32, flexWrap: 'wrap', maxWidth: 520, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 24, maxWidth: 520, margin: '0 auto' }}>
           {[
             { n: '1', title: 'Create', desc: 'Pick dates + activities' },
             { n: '2', title: 'Share', desc: 'One link to your group' },
