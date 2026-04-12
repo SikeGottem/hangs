@@ -317,17 +317,27 @@ export async function getHeatmap(hangId: string) {
   const pRes = await db.execute({ sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [hangId] })
   const total = (pRes.rows[0].cnt as number) || 0
 
-  const slotsRes = await db.execute({
-    sql: `SELECT date, hour, status, COUNT(*) as cnt FROM availability WHERE hang_id = ? GROUP BY date, hour, status`,
+  // Get individual availability with names
+  const detailRes = await db.execute({
+    sql: `SELECT a.date, a.hour, a.status, p.name
+          FROM availability a
+          JOIN participants p ON p.id = a.participant_id
+          WHERE a.hang_id = ?`,
     args: [hangId],
   })
 
-  const heatmap: Record<string, { free: number; maybe: number; total: number; ratio: number }> = {}
-  for (const s of slotsRes.rows) {
-    const key = `${s.date}|${s.hour}`
-    if (!heatmap[key]) heatmap[key] = { free: 0, maybe: 0, total: 0, ratio: 0 }
-    if (s.status === 'free') heatmap[key].free += s.cnt as number
-    else if (s.status === 'maybe') heatmap[key].maybe += s.cnt as number
+  const heatmap: Record<string, { free: number; maybe: number; total: number; ratio: number; freeNames: string[]; maybeNames: string[] }> = {}
+
+  for (const r of detailRes.rows) {
+    const key = `${r.date}|${r.hour}`
+    if (!heatmap[key]) heatmap[key] = { free: 0, maybe: 0, total: 0, ratio: 0, freeNames: [], maybeNames: [] }
+    if (r.status === 'free') {
+      heatmap[key].free++
+      heatmap[key].freeNames.push(r.name as string)
+    } else if (r.status === 'maybe') {
+      heatmap[key].maybe++
+      heatmap[key].maybeNames.push(r.name as string)
+    }
   }
 
   for (const val of Object.values(heatmap)) {

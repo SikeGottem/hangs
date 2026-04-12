@@ -58,6 +58,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [newBringItem, setNewBringItem] = useState("")
   const [subItemInputs, setSubItemInputs] = useState<Record<number, string>>({})
   const [showSubInput, setShowSubInput] = useState<number | null>(null)
+  const [hoverSlot, setHoverSlot] = useState<string | null>(null)
   const [expenseDesc, setExpenseDesc] = useState("")
   const [expenseAmount, setExpenseAmount] = useState("")
   const [pollQuestion, setPollQuestion] = useState("")
@@ -518,7 +519,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
       {/* Availability heatmap */}
       {heatmap && dates.length > 0 && (
-        <div className="card" style={{ padding: 16, marginBottom: 24, overflowX: 'auto' }}>
+        <div className="card" style={{ padding: 16, marginBottom: 24, overflowX: 'auto', position: 'relative' }}>
           <div className="label" style={{ marginBottom: 10 }}>Availability heatmap</div>
           <div style={{ display: 'inline-grid', gridTemplateColumns: `54px repeat(${dates.length}, 48px)`, gap: 2 }}>
             <div />
@@ -531,12 +532,24 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   const cell = heatmap.heatmap[key]
                   const ratio = cell?.ratio || 0
                   const bg = ratio === 0 ? 'var(--surface-dim)' : ratio >= 0.8 ? '#22A85280' : ratio >= 0.5 ? '#34C26A40' : ratio >= 0.25 ? '#F5C84240' : '#E8E3D920'
+                  const isHovered = hoverSlot === key
                   return (
-                    <div key={key} title={cell ? `${cell.free} free, ${cell.maybe} maybe` : 'No data'} style={{
-                      width: 48, height: 36, borderRadius: 6, background: bg,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 11, fontWeight: 600, color: ratio >= 0.5 ? '#1a7a3a' : 'var(--text-muted)',
-                    }}>
+                    <div
+                      key={key}
+                      onMouseEnter={() => setHoverSlot(key)}
+                      onMouseLeave={() => setHoverSlot(null)}
+                      onClick={() => setHoverSlot(hoverSlot === key ? null : key)}
+                      style={{
+                        width: 48, height: 36, borderRadius: 6, background: bg,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 600, color: ratio >= 0.5 ? '#1a7a3a' : 'var(--text-muted)',
+                        cursor: cell?.total ? 'pointer' : 'default',
+                        position: 'relative',
+                        outline: isHovered && cell?.total ? '2px solid var(--accent)' : 'none',
+                        outlineOffset: -1,
+                        transition: 'outline 0.1s ease',
+                      }}
+                    >
                       {cell && cell.total > 0 ? cell.total : ''}
                     </div>
                   )
@@ -544,6 +557,35 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               </div>
             ))}
           </div>
+
+          {/* Tooltip */}
+          {hoverSlot && heatmap.heatmap[hoverSlot]?.total > 0 && (() => {
+            const cell = heatmap.heatmap[hoverSlot]
+            const [date, hourStr] = hoverSlot.split('|')
+            return (
+              <div style={{
+                marginTop: 12, padding: '12px 16px',
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)',
+              }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+                  {formatDay(date)} {formatHour(parseInt(hourStr))}
+                </div>
+                {cell.freeNames?.length > 0 && (
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)' }}>Free: </span>
+                    <span style={{ fontSize: 13 }}>{cell.freeNames.join(', ')}</span>
+                  </div>
+                )}
+                {cell.maybeNames?.length > 0 && (
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#B8940F' }}>Maybe: </span>
+                    <span style={{ fontSize: 13 }}>{cell.maybeNames.join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
 
