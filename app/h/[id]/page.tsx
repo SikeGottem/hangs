@@ -1,6 +1,6 @@
 "use client"
 import { useState, useEffect, useRef, useCallback, use } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 
 const stepAnim = {
@@ -39,8 +39,10 @@ function formatDay(d: string) {
 export default function FriendPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const editPid = searchParams.get('edit') // if editing, skip name step
   const [hang, setHang] = useState<any>(null)
-  const [step, setStep] = useState(0) // 0=name, 1=availability (or 1a=pick days, 1b=pick hours for specific mode), 2=vote, 3=redirect
+  const [step, setStep] = useState(editPid ? 1 : 0) // skip to availability if editing
   const [friendName, setFriendName] = useState("")
   const [participantId, setPid] = useState("")
   const [slots, setSlots] = useState<Record<string, string>>({})
@@ -105,9 +107,17 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
 
   useEffect(() => {
     fetch(`/api/hangs/${id}`).then(r => r.json()).then(d => { setHang(d); setLoading(false) })
+
+    // If editing, use the edit param as participant ID — don't redirect
+    if (editPid) {
+      setPid(editPid)
+      return
+    }
+
+    // Otherwise check if already responded and redirect to results
     const existing = localStorage.getItem(`hangs_participant_${id}`)
     if (existing) { router.replace(`/h/${id}/results`) }
-  }, [id])
+  }, [id, editPid])
 
   const join = async () => {
     const res = await fetch(`/api/hangs/${id}/join`, {
@@ -137,6 +147,12 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ participantId, slots: slotArray }),
     })
+    // If editing, go straight back to results (skip voting)
+    if (editPid) {
+      localStorage.setItem(`hangs_participant_${id}`, participantId)
+      router.push(`/h/${id}/results`)
+      return
+    }
     setStep(2)
   }
 
@@ -147,6 +163,8 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
         body: JSON.stringify({ participantId, activityId: parseInt(actId), vote }),
       })
     }
+    // Ensure localStorage is set so future visits go to results
+    localStorage.setItem(`hangs_participant_${id}`, participantId)
     router.push(`/h/${id}/results`)
   }
 

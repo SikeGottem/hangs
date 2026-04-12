@@ -56,6 +56,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [transportSeats, setTransportSeats] = useState(0)
   const [nudgeCopied, setNudgeCopied] = useState(false)
   const [newBringItem, setNewBringItem] = useState("")
+  const [subItemInputs, setSubItemInputs] = useState<Record<number, string>>({})
+  const [showSubInput, setShowSubInput] = useState<number | null>(null)
   const [expenseDesc, setExpenseDesc] = useState("")
   const [expenseAmount, setExpenseAmount] = useState("")
   const [pollQuestion, setPollQuestion] = useState("")
@@ -189,12 +191,19 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   }
 
   const unclaimItem = async (itemId: number) => {
-    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'unclaim', itemId }) })
+    if (!myPid) return
+    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'unclaim', itemId, participantId: myPid }) })
     fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
   }
 
   const removeBringItem = async (itemId: number) => {
     await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'remove', itemId }) })
+    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
+  }
+
+  const addSubItem = async (parentId: number, item: string) => {
+    if (!item.trim()) return
+    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'add', item, parentId }) })
     fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
   }
 
@@ -279,11 +288,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {myPid && (
         <button
           onClick={() => {
-            // Clear participant flag so the friend page shows the availability flow
-            // but keep the participant ID so it updates rather than creates new
-            localStorage.removeItem(`hangs_participant_${id}`)
-            localStorage.removeItem(`hangs_${id}`)
-            window.location.href = `/h/${id}`
+            // Navigate to friend page in edit mode — keeps existing participant, skips name step
+            window.location.href = `/h/${id}?edit=${myPid}`
           }}
           style={{
             width: '100%', padding: '14px 20px', marginBottom: 20,
@@ -570,29 +576,99 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {/* ════════════ LOGISTICS ════════════ */}
       <SectionGroup title="Logistics" defaultOpen={true}>
 
-      {/* Bring list */}
+      {/* Bring list — supports sub-items + multi-claim */}
       <div className="card" style={{ padding: 20, marginBottom: 24 }}>
         <div className="label" style={{ marginBottom: 12 }}>Bring list</div>
         {bringList.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-            {bringList.map((item: any) => (
-              <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: item.claimed_by ? 'var(--free-light)' : 'var(--surface-dim)', borderRadius: 'var(--radius-sm)' }}>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{item.item}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {item.claimed_by ? (
-                    <>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1a7a3a' }}>{item.claimed_by_name}</span>
-                      {myPid && <button onClick={() => unclaimItem(item.id)} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>undo</button>}
-                    </>
-                  ) : (
-                    myPid && <button onClick={() => claimItem(item.id)} className="chip" style={{ padding: '4px 12px', fontSize: 12 }}>I got this</button>
-                  )}
-                  {myPid && (
-                    <button onClick={() => removeBringItem(item.id)} style={{ fontSize: 16, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>&times;</button>
-                  )}
-                </span>
-              </div>
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+            {bringList.map((item: any) => {
+              const iClaimedThis = item.claims?.some((c: any) => c.participantId === myPid)
+              return (
+                <div key={item.id}>
+                  {/* Parent item */}
+                  <div style={{ padding: '10px 14px', background: 'var(--surface-dim)', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: item.claims?.length > 0 || item.subItems?.length > 0 ? 8 : 0 }}>
+                      <span style={{ fontSize: 15, fontWeight: 600 }}>{item.item}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {myPid && !iClaimedThis && (
+                          <button onClick={() => claimItem(item.id)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--free)', background: 'var(--free-light)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>I'll bring this</button>
+                        )}
+                        {myPid && iClaimedThis && (
+                          <button onClick={() => unclaimItem(item.id)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>Undo</button>
+                        )}
+                        {myPid && (
+                          <button onClick={() => setShowSubInput(showSubInput === item.id ? null : item.id)} style={{ fontSize: 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>+sub</button>
+                        )}
+                        {myPid && (
+                          <button onClick={() => removeBringItem(item.id)} style={{ fontSize: 16, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Claimers */}
+                    {item.claims?.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: item.subItems?.length > 0 ? 8 : 0 }}>
+                        {item.claims.map((c: any, ci: number) => (
+                          <span key={ci} style={{ fontSize: 12, padding: '2px 8px', borderRadius: 4, background: 'var(--free-light)', color: '#1a7a3a', fontWeight: 600 }}>
+                            {c.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Sub-items */}
+                    {item.subItems?.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 16, borderLeft: '2px solid var(--border-light)' }}>
+                        {item.subItems.map((sub: any) => {
+                          const iClaimedSub = sub.claims?.some((c: any) => c.participantId === myPid)
+                          return (
+                            <div key={sub.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div>
+                                <span style={{ fontSize: 13, fontWeight: 500 }}>{sub.item}</span>
+                                {sub.claims?.length > 0 && (
+                                  <span style={{ marginLeft: 6 }}>
+                                    {sub.claims.map((c: any, ci: number) => (
+                                      <span key={ci} style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: 'var(--free-light)', color: '#1a7a3a', fontWeight: 600, marginRight: 3 }}>{c.name}</span>
+                                    ))}
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                {myPid && !iClaimedSub && (
+                                  <button onClick={() => claimItem(sub.id)} style={{ fontSize: 11, color: 'var(--free)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>+me</button>
+                                )}
+                                {myPid && iClaimedSub && (
+                                  <button onClick={() => unclaimItem(sub.id)} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>undo</button>
+                                )}
+                                {myPid && (
+                                  <button onClick={() => removeBringItem(sub.id)} style={{ fontSize: 14, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+                                )}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {/* Add sub-item input */}
+                    {showSubInput === item.id && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                        <input
+                          type="text"
+                          value={subItemInputs[item.id] || ''}
+                          onChange={e => setSubItemInputs(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') { addSubItem(item.id, subItemInputs[item.id] || ''); setSubItemInputs(prev => ({ ...prev, [item.id]: '' })) } }}
+                          placeholder="Sub-item..."
+                          className="input"
+                          style={{ flex: 1, padding: '8px 12px', fontSize: 13 }}
+                        />
+                        <button onClick={() => { addSubItem(item.id, subItemInputs[item.id] || ''); setSubItemInputs(prev => ({ ...prev, [item.id]: '' })) }} className="btn-primary" style={{ width: 'auto', padding: '8px 14px', fontSize: 13 }}>Add</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>

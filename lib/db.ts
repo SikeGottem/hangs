@@ -111,11 +111,20 @@ export async function ensureSchema() {
     `CREATE TABLE IF NOT EXISTS bring_list (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hang_id TEXT NOT NULL,
+      parent_id INTEGER,
       item TEXT NOT NULL,
-      claimed_by TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (hang_id) REFERENCES hangs(id),
-      FOREIGN KEY (claimed_by) REFERENCES participants(id)
+      FOREIGN KEY (parent_id) REFERENCES bring_list(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS bring_list_claims (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      participant_id TEXT NOT NULL,
+      note TEXT,
+      UNIQUE(item_id, participant_id),
+      FOREIGN KEY (item_id) REFERENCES bring_list(id),
+      FOREIGN KEY (participant_id) REFERENCES participants(id)
     )`,
     `CREATE TABLE IF NOT EXISTS expenses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
