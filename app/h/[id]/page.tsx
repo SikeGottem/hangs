@@ -161,7 +161,10 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     </div>
   )
 
-  const dates = generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+  const isSpecificMode = hang.hang.date_mode === 'specific'
+  const dates = isSpecificMode
+    ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
+    : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
 
   return (
     <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px' }}>

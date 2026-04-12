@@ -193,6 +193,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
   }
 
+  const removeBringItem = async (itemId: number) => {
+    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'remove', itemId }) })
+    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
+  }
+
   const addExpense = async () => {
     if (!expenseDesc || !expenseAmount || !myPid) return
     await fetch(`/api/hangs/${id}/expenses`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description: expenseDesc, amount: parseFloat(expenseAmount), paidBy: myPid }) })
@@ -237,8 +242,18 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   }
 
   // Heatmap helpers
-  const dates = hang ? generateDateRange(hang.date_range_start, hang.date_range_end) : []
+  // Use selected_dates for specific mode, generated range for range mode
+  const isSpecificMode = hang?.date_mode === 'specific'
+  const dates = hang
+    ? (isSpecificMode && hang.selected_dates
+      ? (JSON.parse(hang.selected_dates) as string[]).sort()
+      : generateDateRange(hang.date_range_start, hang.date_range_end))
+    : []
   const HOURS = Array.from({ length: 15 }, (_, i) => i + 8)
+
+  // Check if current user has filled in availability
+  const myParticipant = participants.find((p: any) => p.id === myPid)
+  const hasFilledAvailability = myParticipant?.hasResponded
 
   return (
     <div style={{ maxWidth: 560, margin: '0 auto', padding: '16px 20px 100px' }}>
@@ -259,6 +274,36 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           )}
         </div>
       </div>
+
+      {/* Availability prompt — for users who haven't filled in yet or want to edit */}
+      {myPid && (
+        <button
+          onClick={() => {
+            // Clear participant flag so the friend page shows the availability flow
+            // but keep the participant ID so it updates rather than creates new
+            localStorage.removeItem(`hangs_participant_${id}`)
+            localStorage.removeItem(`hangs_${id}`)
+            window.location.href = `/h/${id}`
+          }}
+          style={{
+            width: '100%', padding: '14px 20px', marginBottom: 20,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: hasFilledAvailability ? 'var(--surface)' : 'var(--maybe-light)',
+            border: `1.5px solid ${hasFilledAvailability ? 'var(--border)' : 'var(--maybe)'}`,
+            borderRadius: 'var(--radius-md)', cursor: 'pointer',
+            fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600,
+            color: hasFilledAvailability ? 'var(--text-secondary)' : '#8a6d10',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {hasFilledAvailability
+              ? <><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></>
+              : <><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>
+            }
+          </svg>
+          {hasFilledAvailability ? 'Edit your availability' : 'Add your availability'}
+        </button>
+      )}
 
       {/* Synthesis card */}
       {synthesis ? (
@@ -533,14 +578,19 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             {bringList.map((item: any) => (
               <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: item.claimed_by ? 'var(--free-light)' : 'var(--surface-dim)', borderRadius: 'var(--radius-sm)' }}>
                 <span style={{ fontSize: 14, fontWeight: 500 }}>{item.item}</span>
-                {item.claimed_by ? (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1a7a3a' }}>{item.claimed_by_name}</span>
-                    {myPid && <button onClick={() => unclaimItem(item.id)} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>undo</button>}
-                  </span>
-                ) : (
-                  myPid && <button onClick={() => claimItem(item.id)} className="chip" style={{ padding: '4px 12px', fontSize: 12 }}>I got this</button>
-                )}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {item.claimed_by ? (
+                    <>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1a7a3a' }}>{item.claimed_by_name}</span>
+                      {myPid && <button onClick={() => unclaimItem(item.id)} style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>undo</button>}
+                    </>
+                  ) : (
+                    myPid && <button onClick={() => claimItem(item.id)} className="chip" style={{ padding: '4px 12px', fontSize: 12 }}>I got this</button>
+                  )}
+                  {myPid && (
+                    <button onClick={() => removeBringItem(item.id)} style={{ fontSize: 16, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}>&times;</button>
+                  )}
+                </span>
               </div>
             ))}
           </div>
