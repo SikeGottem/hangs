@@ -225,10 +225,10 @@ export default function Home() {
         style={{
           display: 'flex',
           justifyContent: 'center',
+          alignItems: 'flex-start',
           gap: 16,
           padding: '40px 16px 48px',
-          flexWrap: 'wrap',
-          maxWidth: 560,
+          maxWidth: 600,
           margin: '0 auto',
         }}
       >
@@ -255,7 +255,8 @@ export default function Home() {
           boxShadow: 'var(--shadow-md)',
           display: 'flex',
           flexDirection: 'column',
-          minWidth: 220,
+          flex: 1,
+          minWidth: 0,
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12 }}>
             What to do
