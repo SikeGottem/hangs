@@ -40,11 +40,14 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
   const { id } = use(params)
   const router = useRouter()
   const [hang, setHang] = useState<any>(null)
-  const [step, setStep] = useState(0) // 0=name, 1=availability, 2=vote, 3=redirect
+  const [step, setStep] = useState(0) // 0=name, 1=availability (or 1a=pick days, 1b=pick hours for specific mode), 2=vote, 3=redirect
   const [friendName, setFriendName] = useState("")
   const [participantId, setPid] = useState("")
   const [slots, setSlots] = useState<Record<string, string>>({})
   const [votes, setVotes] = useState<Record<number, string>>({})
+  // Specific-days mode state
+  const [freeDays, setFreeDays] = useState<string[]>([]) // which days the friend picked
+  const [specificStep, setSpecificStep] = useState<'days' | 'hours'>('days')
   const [loading, setLoading] = useState(true)
 
   // Drag-to-select state
@@ -201,9 +204,9 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
         </motion.div>
       )}
 
-      {/* Step 1: Availability */}
-      {step === 1 && (
-        <motion.div key="s1" {...stepAnim} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Step 1: Availability — RANGE MODE (original grid) */}
+      {step === 1 && hang.hang.date_mode !== 'specific' && (
+        <motion.div key="s1-range" {...stepAnim} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <h2 className="section-title" style={{ fontSize: 24 }}>When are you free?</h2>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>
@@ -224,30 +227,21 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
               gridTemplateColumns: `60px repeat(${dates.length}, 48px)`,
               gap: 2,
             }}>
-              {/* Header row */}
               <div />
               {dates.map(d => (
                 <div key={d} className="grid-header">{formatDay(d)}</div>
               ))}
-              {/* Time rows */}
               {HOURS.map(h => (
                 <div key={h} style={{ display: 'contents' }}>
                   <div style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 11,
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-end',
-                    paddingRight: 6,
+                    fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6,
                   }}>{formatHour(h)}</div>
                   {dates.map(d => {
                     const key = `${d}|${h}`
                     const status = slots[key] || "busy"
                     return (
-                      <button
-                        key={key}
-                        data-slot-key={key}
+                      <button key={key} data-slot-key={key}
                         onMouseDown={(e) => { e.preventDefault(); handleDragStart(d, h) }}
                         onMouseEnter={() => handleDragEnter(d, h)}
                         onTouchStart={() => handleDragStart(d, h)}
@@ -261,23 +255,160 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
           </div>
 
           <button onClick={markAllFree} style={{
-            width: '100%',
-            padding: '12px',
-            fontSize: 14,
-            fontWeight: 600,
-            fontFamily: 'var(--font-display)',
-            color: 'var(--free)',
-            background: 'var(--free-light)',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            cursor: 'pointer',
+            width: '100%', padding: '12px', fontSize: 14, fontWeight: 600,
+            fontFamily: 'var(--font-display)', color: 'var(--free)',
+            background: 'var(--free-light)', border: 'none',
+            borderRadius: 'var(--radius-md)', cursor: 'pointer',
           }}>
             I'm down for anything - mark all free
           </button>
 
-          <button onClick={submitAvailability} className="btn-primary">
-            Next
-          </button>
+          <button onClick={submitAvailability} className="btn-primary">Next</button>
+        </motion.div>
+      )}
+
+      {/* Step 1: Availability — SPECIFIC DAYS MODE (two-step: pick days, then hours) */}
+      {step === 1 && hang.hang.date_mode === 'specific' && (
+        <motion.div key="s1-specific" {...stepAnim} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Step 1a: Pick which days work */}
+          {specificStep === 'days' && (
+            <>
+              <div>
+                <h2 className="section-title" style={{ fontSize: 24 }}>Which days work?</h2>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>
+                  Tap the days you could do.
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {(JSON.parse(hang.hang.selected_dates || '[]') as string[]).map((d: string) => {
+                  const date = new Date(d + 'T00:00:00')
+                  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+                  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                  const isSelected = freeDays.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => setFreeDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '16px 20px',
+                        background: isSelected ? 'var(--free-light)' : 'var(--surface)',
+                        border: `2px solid ${isSelected ? 'var(--free)' : 'var(--border-light)'}`,
+                        borderRadius: 'var(--radius-md)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{
+                          fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16,
+                          color: 'var(--text-primary)',
+                        }}>
+                          {dayNames[date.getDay()]}
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {date.getDate()} {months[date.getMonth()]}
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <div style={{
+                          width: 28, height: 28, borderRadius: '50%',
+                          background: 'var(--free)', display: 'flex',
+                          alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              <button
+                onClick={() => setSpecificStep('hours')}
+                disabled={freeDays.length === 0}
+                className="btn-primary"
+              >
+                Next — pick times
+              </button>
+            </>
+          )}
+
+          {/* Step 1b: Pick hours for each selected day */}
+          {specificStep === 'hours' && (
+            <>
+              <div>
+                <h2 className="section-title" style={{ fontSize: 24 }}>What times work?</h2>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>
+                  Tap hours for each day. Green = free, yellow = maybe.
+                </p>
+              </div>
+              {freeDays.sort().map(d => {
+                const date = new Date(d + 'T00:00:00')
+                const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+                return (
+                  <div key={d} style={{ marginBottom: 8 }}>
+                    <div style={{
+                      fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15,
+                      marginBottom: 10, color: 'var(--text-primary)',
+                    }}>
+                      {dayNames[date.getDay()]} {date.getDate()} {months[date.getMonth()]}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {HOURS.map(h => {
+                        const key = `${d}|${h}`
+                        const status = slots[key] || 'busy'
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              const next = status === 'busy' ? 'free' : status === 'free' ? 'maybe' : 'busy'
+                              setSlots(prev => ({ ...prev, [key]: next }))
+                            }}
+                            style={{
+                              padding: '10px 14px',
+                              fontSize: 13,
+                              fontFamily: 'var(--font-mono)',
+                              fontWeight: 600,
+                              borderRadius: 'var(--radius-sm)',
+                              border: `2px solid ${status === 'free' ? 'var(--free)' : status === 'maybe' ? 'var(--maybe)' : 'var(--border-light)'}`,
+                              background: status === 'free' ? 'var(--free-light)' : status === 'maybe' ? 'var(--maybe-light)' : 'var(--surface)',
+                              color: status === 'free' ? '#1a7a3a' : status === 'maybe' ? '#8a6d10' : 'var(--text-muted)',
+                              cursor: 'pointer',
+                              transition: 'all 0.1s ease',
+                            }}
+                          >
+                            {formatHour(h)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {/* Quick actions per day */}
+                    <button
+                      onClick={() => {
+                        const newSlots = { ...slots }
+                        HOURS.forEach(h => { newSlots[`${d}|${h}`] = 'free' })
+                        setSlots(newSlots)
+                      }}
+                      style={{
+                        marginTop: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                        color: 'var(--free)', background: 'none', border: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      All day free
+                    </button>
+                  </div>
+                )
+              })}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button onClick={() => setSpecificStep('days')} className="btn-secondary" style={{ flex: 1 }}>Back</button>
+                <button onClick={submitAvailability} className="btn-primary" style={{ flex: 1 }}>Next</button>
+              </div>
+            </>
+          )}
         </motion.div>
       )}
 

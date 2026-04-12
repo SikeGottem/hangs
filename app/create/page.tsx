@@ -69,8 +69,11 @@ export default function CreatePage() {
   const [template, setTemplate] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [creatorName, setCreatorName] = useState("")
+  const [dateMode, setDateMode] = useState<'range' | 'specific'>('range')
   const [dateStart, setDateStart] = useState("")
   const [dateEnd, setDateEnd] = useState("")
+  const [selectedDates, setSelectedDates] = useState<string[]>([])
+  const [dateInput, setDateInput] = useState("")
   const [activities, setActivities] = useState<Activity[]>([])
   const [customActivity, setCustomActivity] = useState("")
   const [customCost, setCustomCost] = useState("")
@@ -124,8 +127,10 @@ export default function CreatePage() {
       body: JSON.stringify({
         name,
         creatorName,
-        dateRangeStart: dateStart,
-        dateRangeEnd: dateEnd,
+        dateMode,
+        dateRangeStart: dateMode === 'range' ? dateStart : undefined,
+        dateRangeEnd: dateMode === 'range' ? dateEnd : undefined,
+        selectedDates: dateMode === 'specific' ? selectedDates.sort() : undefined,
         activities,
         template,
         location: location || undefined,
@@ -242,16 +247,94 @@ export default function CreatePage() {
               className="input"
             />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>From</label>
-              <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} className="input" />
-            </div>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>To</label>
-              <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} className="input" />
+          {/* Date mode toggle */}
+          <div>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>When?</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => setDateMode('range')}
+                className={`chip ${dateMode === 'range' ? 'chip-active' : ''}`}
+                style={{ flex: 1, justifyContent: 'center' }}
+              >
+                Date range
+              </button>
+              <button
+                onClick={() => setDateMode('specific')}
+                className={`chip ${dateMode === 'specific' ? 'chip-active' : ''}`}
+                style={{ flex: 1, justifyContent: 'center' }}
+              >
+                Specific days
+              </button>
             </div>
           </div>
+
+          {/* Date range mode */}
+          {dateMode === 'range' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 8 }}>From</label>
+                <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 8 }}>To</label>
+                <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} className="input" />
+              </div>
+            </div>
+          )}
+
+          {/* Specific days mode */}
+          {dateMode === 'specific' && (
+            <div>
+              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Add dates</label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input
+                  type="date"
+                  value={dateInput}
+                  onChange={e => setDateInput(e.target.value)}
+                  className="input"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  onClick={() => {
+                    if (dateInput && !selectedDates.includes(dateInput)) {
+                      setSelectedDates(prev => [...prev, dateInput].sort())
+                      setDateInput("")
+                    }
+                  }}
+                  className="btn-primary"
+                  style={{ width: 'auto', padding: '12px 20px' }}
+                >
+                  Add
+                </button>
+              </div>
+              {selectedDates.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {selectedDates.sort().map(d => {
+                    const date = new Date(d + 'T00:00:00')
+                    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+                    const label = `${days[date.getDay()]} ${date.getDate()}/${date.getMonth()+1}`
+                    return (
+                      <div key={d} style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '8px 12px', background: 'var(--accent)',
+                        borderRadius: 'var(--radius-md)', fontWeight: 600, fontSize: 14,
+                        color: 'var(--accent-text)',
+                      }}>
+                        {label}
+                        <button
+                          onClick={() => setSelectedDates(prev => prev.filter(x => x !== d))}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--accent-text)', padding: 0, lineHeight: 1 }}
+                        >&times;</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {selectedDates.length === 0 && (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Pick the days you're considering.</p>
+              )}
+            </div>
+          )}
           <div>
             <label className="label" style={{ display: 'block', marginBottom: 8 }}>Location (optional)</label>
             <input
@@ -286,7 +369,7 @@ export default function CreatePage() {
             <button onClick={() => setStep(0)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
               onClick={() => setStep(2)}
-              disabled={!name || !creatorName || !dateStart || !dateEnd}
+              disabled={!name || !creatorName || (dateMode === 'range' ? (!dateStart || !dateEnd) : selectedDates.length === 0)}
               className="btn-primary"
               style={{ flex: 1 }}
             >
@@ -437,9 +520,23 @@ export default function CreatePage() {
               marginBottom: 16,
             }}>{name}</div>
 
-            <div className="label">Date range</div>
+            <div className="label">{dateMode === 'range' ? 'Date range' : 'Dates'}</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 4, marginBottom: 16 }}>
-              {dateStart} &rarr; {dateEnd}
+              {dateMode === 'range' ? (
+                <>{dateStart} &rarr; {dateEnd}</>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {selectedDates.map(d => {
+                    const date = new Date(d + 'T00:00:00')
+                    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+                    return (
+                      <span key={d} style={{ padding: '4px 10px', background: 'var(--surface-dim)', borderRadius: 6, fontSize: 13 }}>
+                        {days[date.getDay()]} {date.getDate()}/{date.getMonth()+1}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {location && (

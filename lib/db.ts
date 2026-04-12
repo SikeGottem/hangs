@@ -33,6 +33,8 @@ export async function ensureSchema() {
       creator_name TEXT NOT NULL,
       date_range_start TEXT NOT NULL,
       date_range_end TEXT NOT NULL,
+      date_mode TEXT DEFAULT 'range',
+      selected_dates TEXT,
       template TEXT,
       duration INTEGER DEFAULT 2,
       location TEXT,
@@ -174,6 +176,17 @@ export async function ensureSchema() {
   for (const sql of statements) {
     await db.execute(sql)
   }
+
+  // Migrations for existing tables
+  const migrate = async (table: string, col: string, type: string) => {
+    try { await db.execute(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`) } catch {}
+  }
+  await migrate('hangs', 'date_mode', "TEXT DEFAULT 'range'")
+  await migrate('hangs', 'selected_dates', 'TEXT')
+  await migrate('hangs', 'location', 'TEXT')
+  await migrate('hangs', 'duration', 'INTEGER DEFAULT 2')
+  await migrate('hangs', 'template', 'TEXT')
+  await migrate('activities', 'cost_estimate', 'TEXT')
 
   _bootstrapped = true
 }
