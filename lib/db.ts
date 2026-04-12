@@ -5,22 +5,19 @@ let _client: Client | null = null
 
 export function getDb(): Client {
   if (!_client) {
-    // Local dev: use file-based SQLite. Production: use Turso.
-    if (process.env.TURSO_DATABASE_URL) {
-      _client = createClient({
-        url: process.env.TURSO_DATABASE_URL,
-        authToken: process.env.TURSO_AUTH_TOKEN,
-      })
+    const url = (process.env.TURSO_DATABASE_URL || '').trim()
+    const authToken = (process.env.TURSO_AUTH_TOKEN || '').trim()
+
+    if (url) {
+      _client = createClient({ url, authToken })
     } else {
-      _client = createClient({
-        url: 'file:hangs.db',
-      })
+      _client = createClient({ url: 'file:hangs.db' })
     }
   }
   return _client
 }
 
-// Bootstrap schema — call once on app start
+// Bootstrap schema — idempotent, safe to call repeatedly
 let _bootstrapped = false
 export async function ensureSchema() {
   if (_bootstrapped) return
