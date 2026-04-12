@@ -68,9 +68,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [showConfetti, setShowConfetti] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
+  const creatorPid = typeof window !== 'undefined' ? localStorage.getItem(`hangs_${id}`) || '' : ''
   const myPid = typeof window !== 'undefined' ? (
-    localStorage.getItem(`hangs_participant_${id}`) || localStorage.getItem(`hangs_${id}`) || ''
+    localStorage.getItem(`hangs_participant_${id}`) || creatorPid
   ) : ''
+  const isCreator = !!creatorPid
 
   const fetchAll = () => {
     fetch(`/api/hangs/${id}`).then(r => r.json()).then(setData)
@@ -153,6 +155,12 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     navigator.clipboard.writeText(`Hey ${names}! We're planning "${hang.name}" — fill in your availability: ${window.location.origin}/h/${id}`)
     setNudgeCopied(true)
     setTimeout(() => setNudgeCopied(false), 2000)
+  }
+
+  const removeParticipant = async (participantId: string) => {
+    if (!confirm('Remove this person? Their availability, votes, and comments will be deleted.')) return
+    await fetch(`/api/hangs/${id}/participants`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId }) })
+    fetchAll()
   }
 
   const downloadCalendar = async () => {
@@ -507,6 +515,12 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               </div>
               <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
               {!p.hasResponded && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>pending</span>}
+              {isCreator && p.id !== creatorPid && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeParticipant(p.id) }}
+                  style={{ fontSize: 14, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, marginLeft: 2 }}
+                >&times;</button>
+              )}
             </div>
           ))}
         </div>
