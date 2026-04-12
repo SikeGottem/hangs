@@ -167,10 +167,39 @@ const fadeUp = {
 }
 
 export default function Home() {
-  const [stats, setStats] = useState<any>(null)
+  const [myHangs, setMyHangs] = useState<any[]>([])
 
   useEffect(() => {
-    fetch("/api/stats").then(r => r.json()).then(setStats).catch(() => {})
+    // Find hang IDs from localStorage — only show hangs the user is part of
+    const ids: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key) continue
+      // hangs_XXXX = creator, hangs_participant_XXXX = participant
+      let hangId = ''
+      if (key.startsWith('hangs_participant_')) hangId = key.replace('hangs_participant_', '')
+      else if (key.startsWith('hangs_') && !key.startsWith('hangs_participant_')) hangId = key.replace('hangs_', '')
+      if (hangId && hangId.length >= 6) ids.push(hangId)
+    }
+
+    // Fetch details for each hang
+    const unique = [...new Set(ids)]
+    if (unique.length === 0) return
+
+    Promise.all(
+      unique.map(hid =>
+        fetch(`/api/hangs/${hid}`).then(r => r.ok ? r.json() : null).catch(() => null)
+      )
+    ).then(results => {
+      const valid = results.filter(Boolean).map((r: any) => ({
+        id: r.hang.id,
+        name: r.hang.name,
+        status: r.hang.status,
+        participant_count: r.participants?.length || 0,
+        created_at: r.hang.created_at,
+      }))
+      setMyHangs(valid)
+    })
   }, [])
 
   return (
@@ -301,8 +330,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── Recent hangs (if any) ── */}
-      {stats && stats.totalHangs > 0 && (
+      {/* ── Your hangs (only ones you're part of) ── */}
+      {myHangs.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
@@ -311,13 +340,8 @@ export default function Home() {
           style={{ padding: '36px 24px' }}
         >
           <div style={{ maxWidth: 520, margin: '0 auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span className="label">Recent hangs</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)' }}>
-                {stats.totalHangs} total
-              </span>
-            </div>
-            {stats.recentHangs?.map((h: any, i: number) => (
+            <div className="label" style={{ marginBottom: 16 }}>Your hangs</div>
+            {myHangs.map((h: any, i: number) => (
               <motion.div
                 key={h.id}
                 initial={{ opacity: 0, x: -10 }}
