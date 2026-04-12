@@ -251,19 +251,19 @@ export default function Home() {
         initial="hidden"
         animate="visible"
         variants={fadeUp}
+        className="demo-cards-container"
         style={{
           display: 'flex',
           justifyContent: 'center',
-          alignItems: 'stretch',
+          alignItems: 'flex-start',
           gap: 16,
           padding: '40px 16px 48px',
           maxWidth: 600,
           margin: '0 auto',
-          flexWrap: 'wrap',
         }}
       >
-        {/* Grid demo — hide on mobile, too wide */}
-        <div className="demo-grid-card" style={{
+        {/* Grid demo */}
+        <div style={{
           padding: '20px 24px 24px',
           background: 'var(--surface)',
           borderRadius: 'var(--radius-xl)',

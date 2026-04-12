@@ -366,9 +366,14 @@ body {
     padding: 8px 0;
   }
 
-  /* Hide grid demo on mobile — too wide */
-  .demo-grid-card {
-    display: none !important;
+  /* Stack demo cards vertically on mobile */
+  .demo-cards-container {
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+  .demo-cards-container > div {
+    width: 100% !important;
+    max-width: 320px !important;
   }
 
   /* Better tap targets for participant chips */
