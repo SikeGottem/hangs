@@ -193,6 +193,8 @@ export async function ensureSchema() {
   await migrate('hangs', 'duration', 'INTEGER DEFAULT 2')
   await migrate('hangs', 'template', 'TEXT')
   await migrate('activities', 'cost_estimate', 'TEXT')
+  await migrate('bring_list', 'parent_id', 'INTEGER')
+  // Drop old claimed_by column not possible in SQLite, but it's harmless — just unused now
 
   _bootstrapped = true
 }
