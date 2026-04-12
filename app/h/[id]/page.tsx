@@ -196,7 +196,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
       )}
 
       <AnimatePresence mode="wait">
-      {/* Step 0: Name */}
+      {/* Step 0: Name / returning user */}
       {step === 0 && (
         <motion.div key="s0" {...stepAnim} style={{ display: 'flex', flexDirection: 'column', gap: 24, textAlign: 'center', paddingTop: 24 }}>
           <div>
@@ -213,15 +213,59 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
               {hang.hang.creator_name} wants to plan a hangout!
             </p>
           </div>
-          <input
-            type="text" value={friendName} onChange={e => setFriendName(e.target.value)}
-            placeholder="What's your name?"
-            className="input"
-            style={{ textAlign: 'center', fontSize: 18 }}
-          />
-          <button onClick={join} disabled={!friendName.trim()} className="btn-primary">
-            Let's go
-          </button>
+
+          {/* New person */}
+          <div>
+            <input
+              type="text" value={friendName} onChange={e => setFriendName(e.target.value)}
+              placeholder="What's your name?"
+              className="input"
+              style={{ textAlign: 'center', fontSize: 18 }}
+            />
+            <button onClick={join} disabled={!friendName.trim()} className="btn-primary" style={{ marginTop: 12 }}>
+              Join
+            </button>
+          </div>
+
+          {/* Returning person — pick your name */}
+          {hang.participants?.length > 0 && (
+            <div style={{ paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
+              <div className="label" style={{ marginBottom: 10 }}>Already responded? Tap your name</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                {hang.participants.map((p: any) => (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setPid(p.id)
+                      localStorage.setItem(`hangs_participant_${id}`, p.id)
+                      router.replace(`/h/${id}/results`)
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '10px 16px',
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: 'var(--radius-md)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.background = 'var(--maybe-light)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-light)'; e.currentTarget.style.background = 'var(--surface)' }}
+                  >
+                    <div style={{
+                      width: 24, height: 24, borderRadius: '50%',
+                      background: 'var(--accent)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, fontWeight: 700, color: 'var(--accent-text)',
+                    }}>
+                      {p.name.charAt(0).toUpperCase()}
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 

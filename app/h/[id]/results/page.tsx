@@ -417,6 +417,15 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   </span>
                 </button>
               </div>
+              <button
+                onClick={async () => {
+                  await fetch(`/api/hangs/${id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'unconfirm' }) })
+                  fetchAll()
+                }}
+                style={{ marginTop: 8, width: '100%', padding: 8, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+              >
+                Unconfirm plan
+              </button>
             </>
           )}
         </div>
