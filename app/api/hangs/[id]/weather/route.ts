@@ -13,7 +13,24 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const targetDate = (hang.confirmed_date as string) || (hang.date_range_start as string)
     if (!targetDate) return NextResponse.json({ error: 'No date' }, { status: 400 })
 
-    const lat = -33.8688, lon = 151.2093
+    // Geocode location if available, otherwise default to Sydney
+    let lat = -33.8688, lon = 151.2093, locationName = 'Sydney'
+    const location = (hang.location as string || '').trim()
+
+    if (location && !location.startsWith('http')) {
+      try {
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`
+        )
+        const geo = await geoRes.json()
+        if (geo.results?.length > 0) {
+          lat = geo.results[0].latitude
+          lon = geo.results[0].longitude
+          locationName = geo.results[0].name
+        }
+      } catch {}
+    }
+
     const weatherRes = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode&timezone=auto&start_date=${targetDate}&end_date=${targetDate}`,
       { next: { revalidate: 1800 } }
@@ -34,6 +51,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       date: daily.time[0], tempMax: daily.temperature_2m_max[0], tempMin: daily.temperature_2m_min[0],
       precipChance: daily.precipitation_probability_max[0], weatherCode: daily.weathercode[0],
       description: descs[daily.weathercode[0]] || 'Unknown',
+      location: locationName,
     })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 502 })

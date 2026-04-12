@@ -323,7 +323,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {/* Synthesis card */}
       {synthesis ? (
         <div className="synthesis-card" style={{ marginBottom: 24 }}>
-          <div className="label" style={{ color: 'var(--accent)', marginBottom: 12 }}>The Plan</div>
+          <div className="label" style={{ color: 'var(--accent)', marginBottom: 12 }}>Best time — most people free</div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.2 }}>
             {synthesis.recommendedTime.display}
           </div>
