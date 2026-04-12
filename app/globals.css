@@ -56,9 +56,14 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 /* ── BUTTONS ── */
@@ -298,5 +303,77 @@ body {
 .sticky-bar .btn-primary {
   max-width: 520px;
   flex: 1;
+}
+.sticky-bar .btn-secondary {
+  flex: 1;
+}
+
+/* ── MOBILE RESPONSIVE ── */
+@media (max-width: 480px) {
+  .section-title {
+    font-size: 22px;
+  }
+
+  .btn-primary {
+    padding: 14px 20px;
+    font-size: 15px;
+  }
+
+  .btn-secondary {
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+
+  .input {
+    padding: 12px 14px;
+    font-size: 15px;
+  }
+
+  .chip {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .grid-cell {
+    width: 42px;
+    height: 36px;
+    border-radius: 6px;
+  }
+
+  .vote-btn {
+    padding: 12px 8px;
+    font-size: 14px;
+  }
+
+  .synthesis-card {
+    padding: 20px;
+    border-radius: var(--radius-lg);
+  }
+
+  .card {
+    border-radius: var(--radius-md);
+  }
+
+  .sticky-bar {
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .label {
+    font-size: 10px;
+  }
+
+  .section-group-header {
+    padding: 8px 0;
+  }
+}
+
+/* Grid scroll hint — fade on right edge */
+.grid-scroll-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.grid-scroll-container::-webkit-scrollbar {
+  display: none;
 }
 

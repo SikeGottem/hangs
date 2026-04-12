@@ -225,9 +225,11 @@ export default function Home() {
         style={{
           display: 'flex',
           justifyContent: 'center',
-          gap: 24,
-          padding: '48px 24px 56px',
+          gap: 16,
+          padding: '40px 16px 48px',
           flexWrap: 'wrap',
+          maxWidth: 560,
+          margin: '0 auto',
         }}
       >
         {/* Grid demo */}
@@ -269,7 +271,7 @@ export default function Home() {
         borderTop: '1px solid var(--border-light)',
         borderBottom: '1px solid var(--border-light)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 48, flexWrap: 'wrap', maxWidth: 520, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 32, flexWrap: 'wrap', maxWidth: 520, margin: '0 auto' }}>
           {[
             { n: '1', title: 'Create', desc: 'Pick dates + activities' },
             { n: '2', title: 'Share', desc: 'One link to your group' },

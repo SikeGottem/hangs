@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   title: 'hangs — plan your next hangout',
   description: 'Find when everyone is free, vote on what to do, get a plan. One link, 60 seconds.',
   icons: { icon: '/favicon.svg' },
+  viewport: 'width=device-width, initial-scale=1, viewport-fit=cover',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

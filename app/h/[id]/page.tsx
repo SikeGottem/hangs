@@ -215,7 +215,8 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
           </div>
 
           <div
-            style={{ overflowX: 'auto', margin: '0 -20px', padding: '0 20px', userSelect: 'none', touchAction: 'none' }}
+            className="grid-scroll-container"
+            style={{ margin: '0 -20px', padding: '0 20px', userSelect: 'none', touchAction: 'none' }}
             onTouchMove={handleTouchMove}
           >
             <div style={{
