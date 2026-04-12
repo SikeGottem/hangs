@@ -59,6 +59,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [subItemInputs, setSubItemInputs] = useState<Record<number, string>>({})
   const [showSubInput, setShowSubInput] = useState<number | null>(null)
   const [hoverSlot, setHoverSlot] = useState<string | null>(null)
+  const [confirmVotes, setConfirmVotes] = useState<any>(null)
   const [expenseDesc, setExpenseDesc] = useState("")
   const [expenseAmount, setExpenseAmount] = useState("")
   const [pollQuestion, setPollQuestion] = useState("")
@@ -86,6 +87,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     fetch(`/api/hangs/${id}/rsvp`).then(r => r.json()).then(setRsvps).catch(() => {})
     fetch(`/api/hangs/${id}/reactions`).then(r => r.json()).then(setReactions).catch(() => {})
     fetch(`/api/hangs/${id}/heatmap`).then(r => r.json()).then(setHeatmap).catch(() => {})
+    fetch(`/api/hangs/${id}/confirm`).then(r => r.json()).then(setConfirmVotes).catch(() => {})
   }
 
   useEffect(() => {
@@ -128,18 +130,23 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const rainWarning = weather && weather.precipChance > 40 && sortedActivities.some((a: any) => isOutdoor(a.name))
 
   // ── Actions ──
-  const confirmPlan = async () => {
-    if (!synthesis) return
-    await fetch(`/api/hangs/${id}/confirm`, {
+  const voteConfirm = async (vote: string) => {
+    if (!synthesis || !myPid) return
+    const res = await fetch(`/api/hangs/${id}/confirm`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        participantId: myPid,
+        vote,
         date: synthesis.recommendedTime.date,
         hour: synthesis.recommendedTime.hour,
         activityName: synthesis.recommendedActivity?.name || "",
       }),
     })
-    setShowConfetti(true)
-    setTimeout(() => setShowConfetti(false), 3000)
+    const result = await res.json()
+    if (result.status === 'confirmed') {
+      setShowConfetti(true)
+      setTimeout(() => setShowConfetti(false), 3000)
+    }
     fetchAll()
   }
 
@@ -404,9 +411,64 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             })}
           </div>
 
-          {hang.status !== "confirmed" && (
-            <button onClick={confirmPlan} className="btn-primary" style={{ marginTop: 16 }}>Confirm this plan</button>
-          )}
+          {hang.status !== "confirmed" && (() => {
+            const myVote = confirmVotes?.votes?.find((v: any) => v.name === myParticipant?.name)?.vote
+            const yesCount = confirmVotes?.yesCount || 0
+            const threshold = confirmVotes?.threshold || 1
+            const pct = threshold > 0 ? Math.round((yesCount / threshold) * 100) : 0
+            return (
+              <div style={{ marginTop: 16 }}>
+                {/* Progress bar */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <div style={{ flex: 1, height: 6, background: 'var(--border-light)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: yesCount >= threshold ? 'var(--success)' : 'var(--accent)', borderRadius: 3, transition: 'width 0.3s ease' }} />
+                  </div>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {yesCount}/{threshold}
+                  </span>
+                </div>
+
+                {/* Vote buttons */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => voteConfirm('yes')}
+                    className={myVote === 'yes' ? 'btn-primary' : 'btn-secondary'}
+                    style={{ flex: 1 }}
+                  >
+                    {myVote === 'yes' ? 'Voted yes' : 'Lock it in'}
+                  </button>
+                  <button
+                    onClick={() => voteConfirm('no')}
+                    style={{
+                      flex: 'none', padding: '14px 20px',
+                      background: myVote === 'no' ? '#fef2f2' : 'transparent',
+                      border: `1px solid ${myVote === 'no' ? 'var(--error)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                      fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-display)',
+                      color: myVote === 'no' ? 'var(--error)' : 'var(--text-muted)',
+                    }}
+                  >
+                    Not sure
+                  </button>
+                </div>
+
+                {/* Who's voted */}
+                {confirmVotes?.votes?.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                    {confirmVotes.votes.map((v: any, i: number) => (
+                      <span key={i} style={{
+                        fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 600,
+                        background: v.vote === 'yes' ? 'var(--free-light)' : '#fef2f2',
+                        color: v.vote === 'yes' ? '#1a7a3a' : 'var(--error)',
+                      }}>
+                        {v.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           {hang.status === "confirmed" && (
             <>
               <div style={{ marginTop: 16, padding: 12, textAlign: 'center', fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--success)', background: 'var(--free-light)', borderRadius: 'var(--radius-md)' }}>
@@ -976,9 +1038,18 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {synthesis && (
         <div className="sticky-bar">
           {hang.status !== 'confirmed' ? (
-            <button onClick={confirmPlan} className="btn-primary">
-              Confirm: {synthesis.recommendedTime.display}
-            </button>
+            (() => {
+              const myVote = confirmVotes?.votes?.find((v: any) => v.name === myParticipant?.name)?.vote
+              const yesCount = confirmVotes?.yesCount || 0
+              const threshold = confirmVotes?.threshold || 1
+              return (
+                <button onClick={() => voteConfirm(myVote === 'yes' ? 'no' : 'yes')} className="btn-primary" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <span style={{ position: 'relative', zIndex: 1 }}>
+                    {myVote === 'yes' ? `Voted — ${yesCount}/${threshold}` : `Lock it in (${yesCount}/${threshold})`}
+                  </span>
+                </button>
+              )
+            })()
           ) : (
             <>
               <button onClick={() => {

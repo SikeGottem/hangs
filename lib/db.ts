@@ -168,6 +168,15 @@ export async function ensureSchema() {
       FOREIGN KEY (hang_id) REFERENCES hangs(id),
       FOREIGN KEY (participant_id) REFERENCES participants(id)
     )`,
+    `CREATE TABLE IF NOT EXISTS confirm_votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hang_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      vote TEXT NOT NULL DEFAULT 'yes',
+      UNIQUE(hang_id, participant_id),
+      FOREIGN KEY (hang_id) REFERENCES hangs(id),
+      FOREIGN KEY (participant_id) REFERENCES participants(id)
+    )`,
     `CREATE TABLE IF NOT EXISTS reactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hang_id TEXT NOT NULL,
