@@ -1,4 +1,4 @@
-import { createClient, type Client, type InStatement } from '@libsql/client'
+import { createClient, type Client } from '@libsql/client'
 import { randomBytes } from 'crypto'
 
 let _client: Client | null = null
@@ -17,10 +17,19 @@ export function getDb(): Client {
   return _client
 }
 
-// Bootstrap schema — idempotent, safe to call repeatedly
+// Bootstrap schema — idempotent, safe to call repeatedly.
+// On cold starts this runs as ONE batched transaction (1 round-trip) instead
+// of ~27 sequential statements. On warm lambdas the in-memory flag makes it a no-op.
 let _bootstrapped = false
+let _bootstrapPromise: Promise<void> | null = null
 export async function ensureSchema() {
   if (_bootstrapped) return
+  if (_bootstrapPromise) return _bootstrapPromise
+  _bootstrapPromise = _bootstrap()
+  try { await _bootstrapPromise } finally { _bootstrapPromise = null }
+}
+
+async function _bootstrap() {
   const db = getDb()
 
   const statements: string[] = [
@@ -28,6 +37,7 @@ export async function ensureSchema() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       creator_name TEXT NOT NULL,
+      creator_id TEXT,
       date_range_start TEXT NOT NULL,
       date_range_end TEXT NOT NULL,
       date_mode TEXT DEFAULT 'range',
@@ -186,30 +196,81 @@ export async function ensureSchema() {
       FOREIGN KEY (hang_id) REFERENCES hangs(id),
       FOREIGN KEY (participant_id) REFERENCES participants(id)
     )`,
+    `CREATE TABLE IF NOT EXISTS commitment (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hang_id TEXT NOT NULL,
+      participant_id TEXT NOT NULL,
+      level TEXT NOT NULL DEFAULT 'probably',
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(hang_id, participant_id),
+      FOREIGN KEY (hang_id) REFERENCES hangs(id),
+      FOREIGN KEY (participant_id) REFERENCES participants(id)
+    )`,
   ]
 
-  for (const sql of statements) {
-    await db.execute(sql)
-  }
+  // One batched write transaction — 1 network round-trip instead of ~20 sequential.
+  await db.batch(statements, 'write')
 
-  // Migrations for existing tables
-  const migrate = async (table: string, col: string, type: string) => {
-    try { await db.execute(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`) } catch {}
-  }
-  await migrate('hangs', 'date_mode', "TEXT DEFAULT 'range'")
-  await migrate('hangs', 'selected_dates', 'TEXT')
-  await migrate('hangs', 'location', 'TEXT')
-  await migrate('hangs', 'duration', 'INTEGER DEFAULT 2')
-  await migrate('hangs', 'template', 'TEXT')
-  await migrate('activities', 'cost_estimate', 'TEXT')
-  await migrate('bring_list', 'parent_id', 'INTEGER')
-  // Drop old claimed_by column not possible in SQLite, but it's harmless — just unused now
+  // Migrations run in parallel since each is independent and ALTER TABLE can fail
+  // harmlessly when the column already exists.
+  const migrations: [string, string, string][] = [
+    ['hangs', 'date_mode', "TEXT DEFAULT 'range'"],
+    ['hangs', 'selected_dates', 'TEXT'],
+    ['hangs', 'location', 'TEXT'],
+    ['hangs', 'duration', 'INTEGER DEFAULT 2'],
+    ['hangs', 'template', 'TEXT'],
+    ['hangs', 'creator_id', 'TEXT'],
+    ['hangs', 'description', 'TEXT'],
+    ['hangs', 'theme', 'TEXT'],
+    ['hangs', 'dress_code', 'TEXT'],
+    ['hangs', 'response_deadline', 'TEXT'],
+    ['hangs', 'ask_dietary', 'INTEGER DEFAULT 0'],
+    ['hangs', 'custom_question', 'TEXT'],
+    ['hangs', 'locked_at', 'TEXT'],
+    ['hangs', 'cancelled_at', 'TEXT'],
+    ['activities', 'cost_estimate', 'TEXT'],
+    ['bring_list', 'parent_id', 'INTEGER'],
+    ['participants', 'dietary', 'TEXT'],
+    ['participants', 'custom_answer', 'TEXT'],
+  ]
+  await Promise.allSettled(
+    migrations.map(([t, c, ty]) => db.execute(`ALTER TABLE ${t} ADD COLUMN ${c} ${ty}`))
+  )
+
+  // Backfill: for existing hangs missing a creator_id, set it from the oldest
+  // participant matching creator_name. Safe to run repeatedly.
+  try {
+    await db.execute(`
+      UPDATE hangs SET creator_id = (
+        SELECT p.id FROM participants p
+        WHERE p.hang_id = hangs.id AND p.name = hangs.creator_name
+        ORDER BY p.created_at LIMIT 1
+      )
+      WHERE creator_id IS NULL
+    `)
+  } catch {}
 
   _bootstrapped = true
 }
 
 export function genId(len = 8): string {
   return randomBytes(len).toString('base64url').slice(0, len)
+}
+
+// Read the hang's lock/cancel state. Used by mutation routes to reject writes
+// after the creator has locked responses or cancelled the hang.
+export async function getHangState(hangId: string) {
+  const db = getDb()
+  const res = await db.execute({
+    sql: 'SELECT id, locked_at, cancelled_at FROM hangs WHERE id = ?',
+    args: [hangId],
+  })
+  if (!res.rows[0]) return { exists: false as const }
+  return {
+    exists: true as const,
+    locked: !!res.rows[0].locked_at,
+    cancelled: !!res.rows[0].cancelled_at,
+  }
 }
 
 // ── Formatting helpers ──
@@ -225,34 +286,73 @@ function formatSlotDisplay(date: string, hour: number) {
 
 // ── Synthesis ──
 
-export async function synthesise(hangId: string) {
-  const db = getDb()
-  await ensureSchema()
+type SynthParticipant = { id: string; name: string }
+type SynthAvail = { participant_id: string; date: string; hour: number; status: string }
+type SynthActivity = { id?: number; name: string; ups: number; downs: number }
+export type CommitmentLevel = 'in' | 'probably' | 'cant'
+type SynthCommitment = { participant_id: string; level: CommitmentLevel }
 
-  const participantsRes = await db.execute({ sql: 'SELECT * FROM participants WHERE hang_id = ?', args: [hangId] })
-  const participants = participantsRes.rows
+// Weight applied to a participant's free/maybe contribution to a slot's score
+// based on how likely they actually are to show up. Matches Phase 2.3 spec.
+const COMMITMENT_WEIGHT: Record<CommitmentLevel, number> = {
+  in: 1.0,
+  probably: 0.5,
+  cant: 0,
+}
+
+// Pure synthesis — takes pre-fetched data so the caller can batch its DB round-trips.
+// No DB access inside. The main hang route uses this with data already in hand.
+export function synthesiseFromData(
+  participants: SynthParticipant[],
+  allAvail: SynthAvail[],
+  activities: SynthActivity[],
+  commitments: SynthCommitment[] = [],
+) {
   const totalParticipants = participants.length
   if (totalParticipants === 0) return null
 
-  const allAvailRes = await db.execute({ sql: 'SELECT participant_id, date, hour, status FROM availability WHERE hang_id = ?', args: [hangId] })
-  const allAvail = allAvailRes.rows
-
   const participantMap: Record<string, string> = {}
-  for (const p of participants) participantMap[p.id as string] = p.name as string
+  for (const p of participants) participantMap[p.id] = p.name
 
-  const slotPeople: Record<string, { free: string[]; maybe: string[]; absent: string[] }> = {}
+  const commitmentById: Record<string, CommitmentLevel> = {}
+  for (const c of commitments) commitmentById[c.participant_id] = c.level
+  const weightFor = (pid: string) => {
+    const lvl = commitmentById[pid]
+    // Unknown = treat as 'probably' by default so unrated participants don't
+    // fully dominate or fully drop out of the ranking.
+    return lvl ? COMMITMENT_WEIGHT[lvl] : 0.75
+  }
+
+  // Per-slot breakdown: raw free/maybe names (for display) + commitment-weighted
+  // attendance score (for ranking).
+  type SlotBucket = {
+    free: string[]
+    maybe: string[]
+    absent: string[]
+    weightedFree: number
+    weightedMaybe: number
+  }
+  const slotPeople: Record<string, SlotBucket> = {}
   const slotSet = new Set<string>()
   for (const a of allAvail) slotSet.add(`${a.date}|${a.hour}`)
-  for (const key of slotSet) slotPeople[key] = { free: [], maybe: [], absent: [] }
+  for (const key of slotSet) {
+    slotPeople[key] = { free: [], maybe: [], absent: [], weightedFree: 0, weightedMaybe: 0 }
+  }
 
   for (const a of allAvail) {
     const key = `${a.date}|${a.hour}`
-    const name = participantMap[a.participant_id as string] || (a.participant_id as string)
-    if (a.status === 'free') slotPeople[key].free.push(name)
-    else if (a.status === 'maybe') slotPeople[key].maybe.push(name)
+    const name = participantMap[a.participant_id] || a.participant_id
+    const w = weightFor(a.participant_id)
+    if (a.status === 'free') {
+      slotPeople[key].free.push(name)
+      slotPeople[key].weightedFree += w
+    } else if (a.status === 'maybe') {
+      slotPeople[key].maybe.push(name)
+      slotPeople[key].weightedMaybe += w
+    }
   }
 
-  const respondedIds = new Set(allAvail.map(a => a.participant_id as string))
+  const respondedIds = new Set(allAvail.map(a => a.participant_id))
   for (const key of Object.keys(slotPeople)) {
     const freeSet = new Set(slotPeople[key].free)
     const maybeSet = new Set(slotPeople[key].maybe)
@@ -267,7 +367,9 @@ export async function synthesise(hangId: string) {
   const scored = Object.entries(slotPeople).map(([key, people]) => {
     const [date, hourStr] = key.split('|')
     const hour = parseInt(hourStr)
-    const score = people.free.length * 1.0 + people.maybe.length * 0.5
+    // Ranking score uses commitment weights: a slot full of "probably" people
+    // scores lower than the same slot with "in" people.
+    const score = people.weightedFree * 1.0 + people.weightedMaybe * 0.5
     return {
       date, hour, score,
       free: people.free.length, maybe: people.maybe.length,
@@ -280,17 +382,10 @@ export async function synthesise(hangId: string) {
   const top3 = scored.slice(0, 3)
   const bestSlot = top3[0] || { date: '', hour: 0, score: 0, free: 0, maybe: 0, total: 0, freeNames: [], maybeNames: [], absentNames: [], display: '' }
 
-  const actRes = await db.execute({
-    sql: `SELECT a.id, a.name,
-      SUM(CASE WHEN av.vote = 'up' THEN 1 ELSE 0 END) as ups,
-      SUM(CASE WHEN av.vote = 'down' THEN 1 ELSE 0 END) as downs
-    FROM activities a LEFT JOIN activity_votes av ON av.activity_id = a.id
-    WHERE a.hang_id = ? GROUP BY a.id
-    ORDER BY (SUM(CASE WHEN av.vote = 'up' THEN 1 ELSE 0 END) - SUM(CASE WHEN av.vote = 'down' THEN 1 ELSE 0 END)) DESC
-    LIMIT 1`,
-    args: [hangId],
-  })
-  const activityScores = actRes.rows[0] || null
+  // Top activity: highest (ups - downs), preferring ups as tiebreaker
+  const topActivity = [...activities]
+    .sort((a, b) => ((b.ups || 0) - (b.downs || 0)) - ((a.ups || 0) - (a.downs || 0)) || (b.ups || 0) - (a.ups || 0))
+    [0] || null
 
   const respondedCount = respondedIds.size
   const confidence = respondedCount >= totalParticipants * 0.7 ? 'high'
@@ -308,13 +403,53 @@ export async function synthesise(hangId: string) {
       freeCount: s.free, maybeCount: s.maybe, attendeeCount: s.total,
       absentNames: s.absentNames,
     })),
-    recommendedActivity: activityScores ? {
-      name: activityScores.name as string,
-      ups: (activityScores.ups as number) || 0,
-      downs: (activityScores.downs as number) || 0,
+    recommendedActivity: topActivity && (topActivity.ups || 0) > 0 ? {
+      name: topActivity.name,
+      ups: topActivity.ups || 0,
+      downs: topActivity.downs || 0,
     } : null,
     confidence, respondedCount, totalParticipants,
   }
+}
+
+// Back-compat wrapper — /api/hangs/[id]/synthesis still calls this. One batched read.
+export async function synthesise(hangId: string) {
+  const db = getDb()
+  await ensureSchema()
+
+  const [participantsRes, allAvailRes, actRes, commitRes] = await db.batch([
+    { sql: 'SELECT id, name FROM participants WHERE hang_id = ?', args: [hangId] },
+    { sql: 'SELECT participant_id, date, hour, status FROM availability WHERE hang_id = ?', args: [hangId] },
+    {
+      sql: `SELECT a.id, a.name,
+        SUM(CASE WHEN av.vote = 'up' THEN 1 ELSE 0 END) as ups,
+        SUM(CASE WHEN av.vote = 'down' THEN 1 ELSE 0 END) as downs
+      FROM activities a LEFT JOIN activity_votes av ON av.activity_id = a.id
+      WHERE a.hang_id = ? GROUP BY a.id`,
+      args: [hangId],
+    },
+    { sql: 'SELECT participant_id, level FROM commitment WHERE hang_id = ?', args: [hangId] },
+  ], 'read')
+
+  return synthesiseFromData(
+    participantsRes.rows.map(r => ({ id: r.id as string, name: r.name as string })),
+    allAvailRes.rows.map(r => ({
+      participant_id: r.participant_id as string,
+      date: r.date as string,
+      hour: r.hour as number,
+      status: r.status as string,
+    })),
+    actRes.rows.map(r => ({
+      id: r.id as number,
+      name: r.name as string,
+      ups: (r.ups as number) || 0,
+      downs: (r.downs as number) || 0,
+    })),
+    commitRes.rows.map(r => ({
+      participant_id: r.participant_id as string,
+      level: r.level as CommitmentLevel,
+    })),
+  )
 }
 
 // ── Heatmap ──
@@ -323,17 +458,18 @@ export async function getHeatmap(hangId: string) {
   const db = getDb()
   await ensureSchema()
 
-  const pRes = await db.execute({ sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [hangId] })
-  const total = (pRes.rows[0].cnt as number) || 0
+  const [pRes, detailRes] = await db.batch([
+    { sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [hangId] },
+    {
+      sql: `SELECT a.date, a.hour, a.status, p.name
+            FROM availability a
+            JOIN participants p ON p.id = a.participant_id
+            WHERE a.hang_id = ?`,
+      args: [hangId],
+    },
+  ], 'read')
 
-  // Get individual availability with names
-  const detailRes = await db.execute({
-    sql: `SELECT a.date, a.hour, a.status, p.name
-          FROM availability a
-          JOIN participants p ON p.id = a.participant_id
-          WHERE a.hang_id = ?`,
-    args: [hangId],
-  })
+  const total = (pRes.rows[0].cnt as number) || 0
 
   const heatmap: Record<string, { free: number; maybe: number; total: number; ratio: number; freeNames: string[]; maybeNames: string[] }> = {}
 

@@ -1,5 +1,21 @@
+// /api/hangs/[id]/photos — GET (public), POST (token-authenticated) + magic-byte check
 import { NextResponse } from 'next/server'
 import { getDb, ensureSchema } from '@/lib/db'
+import { requireAuth } from '@/lib/auth'
+import { PhotoSchema, parseBody } from '@/lib/schemas'
+import { serverError, badRequest, unauthorized } from '@/lib/errors'
+
+// Server-side magic-byte check as a backup to client-side EXIF stripping.
+// Only accept JPEG and PNG base64 data URLs.
+function isJpegOrPng(dataUrl: string): boolean {
+  if (!dataUrl.startsWith('data:image/jpeg') && !dataUrl.startsWith('data:image/png')) {
+    return false
+  }
+  const base64 = dataUrl.split(',')[1] || ''
+  if (base64.length < 8) return false
+  // JPEG: /9j/ (FF D8 FF)  |  PNG: iVBORw0 (89 50 4E 47 0D 0A 1A 0A)
+  return base64.startsWith('/9j/') || base64.startsWith('iVBORw0')
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,22 +27,32 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       args: [id],
     })
     return NextResponse.json(res.rows)
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return serverError(e, 'GET /photos')
   }
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { participantId, data, caption } = await req.json()
-    if (!participantId || !data) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
-    if (data.length > 5_000_000) return NextResponse.json({ error: 'Photo too large' }, { status: 400 })
+    const raw = await req.json()
+    const auth = await requireAuth(req, id, raw)
+    if (!auth) return unauthorized()
+
+    const parsed = parseBody(raw, PhotoSchema)
+    if ('error' in parsed) return badRequest(parsed.error)
+    const { data, caption } = parsed.data
+
+    if (!isJpegOrPng(data)) return badRequest('Only JPEG or PNG images allowed')
+
     const db = getDb()
     await ensureSchema()
-    await db.execute({ sql: 'INSERT INTO photos (hang_id, participant_id, data, caption) VALUES (?, ?, ?, ?)', args: [id, participantId, data, caption || null] })
+    await db.execute({
+      sql: 'INSERT INTO photos (hang_id, participant_id, data, caption) VALUES (?, ?, ?, ?)',
+      args: [id, auth.sub, data, caption || null],
+    })
     return NextResponse.json({ success: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return serverError(e, 'POST /photos')
   }
 }

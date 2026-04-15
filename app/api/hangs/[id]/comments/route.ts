@@ -1,5 +1,9 @@
+// /api/hangs/[id]/comments — GET (public), POST (token-authenticated)
 import { NextResponse } from 'next/server'
 import { getDb, ensureSchema } from '@/lib/db'
+import { requireAuth } from '@/lib/auth'
+import { CommentSchema, parseBody } from '@/lib/schemas'
+import { serverError, badRequest, unauthorized } from '@/lib/errors'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -12,21 +16,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       args: [id],
     })
     return NextResponse.json(res.rows)
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return serverError(e, 'GET /comments')
   }
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { participantId, text } = await req.json()
-    if (!participantId || !text?.trim()) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
+    const raw = await req.json()
+    const auth = await requireAuth(req, id, raw)
+    if (!auth) return unauthorized()
+
+    const parsed = parseBody(raw, CommentSchema)
+    if ('error' in parsed) return badRequest(parsed.error)
+
     const db = getDb()
     await ensureSchema()
-    await db.execute({ sql: 'INSERT INTO comments (hang_id, participant_id, text) VALUES (?, ?, ?)', args: [id, participantId, text.trim()] })
+    await db.execute({
+      sql: 'INSERT INTO comments (hang_id, participant_id, text) VALUES (?, ?, ?)',
+      args: [id, auth.sub, parsed.data.text],
+    })
     return NextResponse.json({ success: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return serverError(e, 'POST /comments')
   }
 }

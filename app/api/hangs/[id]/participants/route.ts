@@ -1,34 +1,58 @@
+// DELETE /api/hangs/[id]/participants — creator can remove anyone (except themselves),
+// or a participant can remove themselves. Cascade-deletes all owned rows.
 import { NextResponse } from 'next/server'
 import { getDb, ensureSchema } from '@/lib/db'
+import { requireAuth } from '@/lib/auth'
+import { serverError, badRequest, unauthorized, notFound } from '@/lib/errors'
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { participantId } = await req.json()
-    if (!participantId) return NextResponse.json({ error: 'Missing participantId' }, { status: 400 })
+    const raw = await req.json().catch(() => ({}))
+    const auth = await requireAuth(req, id, raw)
+    if (!auth) return unauthorized()
 
     const db = getDb()
     await ensureSchema()
 
-    // Don't allow removing the creator
-    const hang = await db.execute({ sql: 'SELECT creator_name FROM hangs WHERE id = ?', args: [id] })
-    const participant = await db.execute({ sql: 'SELECT name FROM participants WHERE id = ? AND hang_id = ?', args: [participantId, id] })
-    if (participant.rows[0] && hang.rows[0] && participant.rows[0].name === hang.rows[0].creator_name) {
-      return NextResponse.json({ error: "Can't remove the creator" }, { status: 400 })
+    const hangRes = await db.execute({
+      sql: 'SELECT creator_id FROM hangs WHERE id = ?',
+      args: [id],
+    })
+    if (!hangRes.rows[0]) return notFound('Hang not found')
+    const creatorId = hangRes.rows[0].creator_id as string | null
+
+    // Target defaults to the caller (self-delete) unless explicitly passed.
+    const target = (raw as any).participantId || auth.sub
+    const isSelfDelete = target === auth.sub
+    const isCreatorCall = auth.role === 'creator' && auth.sub === creatorId
+
+    if (!isSelfDelete && !isCreatorCall) {
+      return unauthorized('Only the creator or the participant themselves can remove this')
     }
 
-    // Remove all related data
-    await db.execute({ sql: 'DELETE FROM availability WHERE participant_id = ? AND hang_id = ?', args: [participantId, id] })
-    await db.execute({ sql: 'DELETE FROM activity_votes WHERE participant_id = ?', args: [participantId] })
-    await db.execute({ sql: 'DELETE FROM comments WHERE participant_id = ? AND hang_id = ?', args: [participantId, id] })
-    await db.execute({ sql: 'DELETE FROM transport WHERE participant_id = ? AND hang_id = ?', args: [participantId, id] })
-    await db.execute({ sql: 'DELETE FROM rsvp WHERE participant_id = ? AND hang_id = ?', args: [participantId, id] })
-    await db.execute({ sql: 'DELETE FROM reactions WHERE participant_id = ? AND hang_id = ?', args: [participantId, id] })
-    await db.execute({ sql: 'DELETE FROM bring_list_claims WHERE participant_id = ?', args: [participantId] })
-    await db.execute({ sql: 'DELETE FROM participants WHERE id = ? AND hang_id = ?', args: [participantId, id] })
+    // Creator can't delete themselves via this endpoint — they should delete the hang.
+    if (isSelfDelete && auth.sub === creatorId) {
+      return badRequest('Creator cannot remove themselves — delete the hang instead')
+    }
+
+    await db.batch(
+      [
+        { sql: 'DELETE FROM availability WHERE participant_id = ? AND hang_id = ?', args: [target, id] },
+        { sql: 'DELETE FROM activity_votes WHERE participant_id = ?', args: [target] },
+        { sql: 'DELETE FROM comments WHERE participant_id = ? AND hang_id = ?', args: [target, id] },
+        { sql: 'DELETE FROM transport WHERE participant_id = ? AND hang_id = ?', args: [target, id] },
+        { sql: 'DELETE FROM rsvp WHERE participant_id = ? AND hang_id = ?', args: [target, id] },
+        { sql: 'DELETE FROM reactions WHERE participant_id = ? AND hang_id = ?', args: [target, id] },
+        { sql: 'DELETE FROM bring_list_claims WHERE participant_id = ?', args: [target] },
+        { sql: 'DELETE FROM confirm_votes WHERE participant_id = ? AND hang_id = ?', args: [target, id] },
+        { sql: 'DELETE FROM participants WHERE id = ? AND hang_id = ?', args: [target, id] },
+      ],
+      'write',
+    )
 
     return NextResponse.json({ success: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return serverError(e, 'DELETE /participants')
   }
 }
