@@ -1,5 +1,8 @@
 "use client"
 import { useState, useEffect, useRef, use } from "react"
+import { showToast } from "@/components/Toast"
+import { showConfirm } from "@/components/ui/ConfirmModal"
+import { formatDeadline } from "@/lib/time"
 
 // ── Section group component (Miller's Law — chunk into ~3 groups) ──
 function SectionGroup({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -49,6 +52,10 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [rsvps, setRsvps] = useState<any[]>([])
   const [reactions, setReactions] = useState<any[]>([])
   const [heatmap, setHeatmap] = useState<any>(null)
+  const [commitment, setCommitment] = useState<{
+    aggregate: { in: number; probably: number; cant: number; unknown: number }
+    byParticipant: Record<string, 'in' | 'probably' | 'cant'>
+  } | null>(null)
 
   // Form state
   const [newComment, setNewComment] = useState("")
@@ -69,37 +76,146 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [showConfetti, setShowConfetti] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
+  // ── Creator admin state ──
+  const [editingField, setEditingField] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
+  const [showPendingList, setShowPendingList] = useState(false)
+  const [newActivityName, setNewActivityName] = useState('')
+  const [newActivityCost, setNewActivityCost] = useState('')
+
   const creatorPid = typeof window !== 'undefined' ? localStorage.getItem(`hangs_${id}`) || '' : ''
   const myPid = typeof window !== 'undefined' ? (
     localStorage.getItem(`hangs_participant_${id}`) || creatorPid
   ) : ''
   const isCreator = !!creatorPid
 
-  const fetchAll = () => {
-    fetch(`/api/hangs/${id}`).then(r => r.json()).then(setData)
-    fetch(`/api/hangs/${id}/comments`).then(r => r.json()).then(setComments).catch(() => {})
-    fetch(`/api/hangs/${id}/weather`).then(r => r.json()).then(d => { if (!d.error) setWeather(d) }).catch(() => {})
-    fetch(`/api/hangs/${id}/transport`).then(r => r.json()).then(setTransport).catch(() => {})
-    fetch(`/api/hangs/${id}/photos`).then(r => r.json()).then(setPhotos).catch(() => {})
-    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList).catch(() => {})
-    fetch(`/api/hangs/${id}/expenses`).then(r => r.json()).then(setExpenseData).catch(() => {})
-    fetch(`/api/hangs/${id}/polls`).then(r => r.json()).then(setPolls).catch(() => {})
-    fetch(`/api/hangs/${id}/rsvp`).then(r => r.json()).then(setRsvps).catch(() => {})
-    fetch(`/api/hangs/${id}/reactions`).then(r => r.json()).then(setReactions).catch(() => {})
-    fetch(`/api/hangs/${id}/heatmap`).then(r => r.json()).then(setHeatmap).catch(() => {})
-    fetch(`/api/hangs/${id}/confirm`).then(r => r.json()).then(setConfirmVotes).catch(() => {})
+  // Authorization header for every mutation request. Token is issued by /join
+  // or the create endpoint and stored in localStorage as hangs_token_{id}.
+  const authHeaders = (): HeadersInit => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem(`hangs_token_${id}`) || '' : ''
+    return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
   }
 
+  // Single fetch hitting /state — one batched DB round-trip instead of 12 parallel endpoints.
+  const fetchState = async () => {
+    try {
+      const res = await fetch(`/api/hangs/${id}/state`)
+      if (!res.ok) {
+        if (res.status !== 404) showToast('Failed to refresh — retrying…', 'error')
+        return
+      }
+      const d = await res.json()
+      if (d.error) return
+      setData({
+        hang: d.hang,
+        participants: d.participants,
+        activities: d.activities,
+        availability: d.availability,
+        synthesis: d.synthesis,
+      })
+      setComments(d.comments || [])
+      setTransport(d.transport || [])
+      setBringList(d.bringList || [])
+      setExpenseData(d.expenseData)
+      setPolls(d.polls || [])
+      setRsvps(d.rsvps || [])
+      setReactions(d.reactions || [])
+      setHeatmap(d.heatmap)
+      setConfirmVotes(d.confirmVotes)
+      setCommitment(d.commitment || null)
+    } catch {
+      showToast('Network error — check your connection', 'error')
+    }
+  }
+
+  // Weather and photos live outside the hot-path poll — they change slowly.
+  const fetchWeather = () => fetch(`/api/hangs/${id}/weather`)
+    .then(r => r.json())
+    .then(d => { if (!d.error) setWeather(d) })
+    .catch(err => console.warn('[hangs] weather fetch failed:', err))
+  const fetchPhotos = () => fetch(`/api/hangs/${id}/photos`)
+    .then(r => r.json())
+    .then(setPhotos)
+    .catch(err => console.warn('[hangs] photos fetch failed:', err))
+
+  // Kept for child actions that need to trigger a refresh (kept name for minimal diff below).
+  const fetchAll = fetchState
+
   useEffect(() => {
-    fetchAll()
-    const interval = setInterval(fetchAll, 5000)
-    return () => clearInterval(interval)
+    // Initial paint
+    fetchState()
+    fetchWeather()
+    fetchPhotos()
+
+    // Self-scheduling loop — never stacks requests, pauses when tab is hidden.
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const tick = async () => {
+      if (cancelled) return
+      if (document.visibilityState === 'visible') {
+        await fetchState()
+      }
+      if (!cancelled) timer = setTimeout(tick, 5000)
+    }
+    timer = setTimeout(tick, 5000)
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') fetchState()
+    }
+    document.addEventListener('visibilitychange', onVis)
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [id])
 
   if (!data) return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 12 }}>
-      <div style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    <div style={{ maxWidth: 640, margin: '0 auto', padding: '16px 20px 48px' }}>
+      <style>{`
+        @keyframes hangs-skeleton-shimmer {
+          0% { background-position: -400px 0 }
+          100% { background-position: 400px 0 }
+        }
+        .hangs-skel {
+          background: linear-gradient(90deg, var(--surface-dim) 0%, var(--border-light) 50%, var(--surface-dim) 100%);
+          background-size: 800px 100%;
+          animation: hangs-skeleton-shimmer 1.4s linear infinite;
+          border-radius: var(--radius-sm);
+        }
+      `}</style>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div className="hangs-skel" style={{ height: 28, width: '55%' }} />
+        <div className="hangs-skel" style={{ height: 28, width: 72 }} />
+      </div>
+      {/* Synthesis card */}
+      <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+        <div className="hangs-skel" style={{ height: 14, width: 90, marginBottom: 12 }} />
+        <div className="hangs-skel" style={{ height: 28, width: '70%', marginBottom: 8 }} />
+        <div className="hangs-skel" style={{ height: 14, width: '40%' }} />
+      </div>
+      {/* Heatmap placeholder */}
+      <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+        <div className="hangs-skel" style={{ height: 14, width: 70, marginBottom: 14 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+          {Array.from({ length: 28 }).map((_, i) => (
+            <div key={i} className="hangs-skel" style={{ height: 22, opacity: 0.6 + (Math.sin(i) * 0.2) }} />
+          ))}
+        </div>
+      </div>
+      {/* Who's in */}
+      <div className="card" style={{ padding: 20 }}>
+        <div className="hangs-skel" style={{ height: 14, width: 80, marginBottom: 14 }} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="hangs-skel" style={{ height: 32, width: 72 + (i * 8), borderRadius: 16 }} />
+          ))}
+        </div>
+      </div>
     </div>
   )
 
@@ -133,7 +249,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const voteConfirm = async (vote: string) => {
     if (!synthesis || !myPid) return
     const res = await fetch(`/api/hangs/${id}/confirm`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: authHeaders(),
       body: JSON.stringify({
         participantId: myPid,
         vote,
@@ -152,7 +268,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
   const postComment = async () => {
     if (!newComment.trim() || !myPid) return
-    await fetch(`/api/hangs/${id}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: myPid, text: newComment }) })
+    await fetch(`/api/hangs/${id}/comments`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ participantId: myPid, text: newComment }) })
     setNewComment("")
     fetch(`/api/hangs/${id}/comments`).then(r => r.json()).then(setComments)
   }
@@ -164,9 +280,89 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     setTimeout(() => setNudgeCopied(false), 2000)
   }
 
+  // Build a plain-text summary for pasting into Messenger / WhatsApp / iMessage.
+  // Shape changes based on whether the hang is confirmed (final plan) or still
+  // being decided (call-to-action for pending responders).
+  const copySummary = async () => {
+    if (!hang) return
+    const url = `${window.location.origin}/h/${id}`
+    const lines: string[] = []
+
+    if (hang.status === 'confirmed' && hang.confirmed_date) {
+      const d = new Date(hang.confirmed_date + 'T00:00:00')
+      const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]
+      const monthName = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]
+      const hour = hang.confirmed_hour || 12
+      const timeStr = hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`
+      lines.push(`📅 ${hang.name}`)
+      lines.push(`🕒 ${dayName} ${d.getDate()} ${monthName}, ${timeStr}`)
+      if (hang.location) {
+        const loc = hang.location.startsWith('http') ? hang.location : hang.location
+        lines.push(`📍 ${loc.length > 80 ? loc.slice(0, 80) + '…' : loc}`)
+      }
+      const byP = commitment?.byParticipant || {}
+      const inNames = participants.filter((p: any) => byP[p.id] === 'in').map((p: any) => p.name)
+      const probablyNames = participants.filter((p: any) => byP[p.id] === 'probably').map((p: any) => p.name)
+      if (inNames.length > 0) lines.push(`✅ In: ${inNames.join(', ')}`)
+      if (probablyNames.length > 0) lines.push(`🤔 Probably: ${probablyNames.join(', ')}`)
+      const claimedBring = bringList.filter((b: any) => b.claimedBy && b.claimedBy.length > 0)
+      if (claimedBring.length > 0) {
+        const bringStr = claimedBring.slice(0, 5).map((b: any) => `${b.item} (${b.claimedBy.map((c: any) => c.name).join(', ')})`).join(' · ')
+        lines.push(`🎒 ${bringStr}${claimedBring.length > 5 ? ' …' : ''}`)
+      }
+      lines.push(`🔗 ${url}`)
+    } else {
+      lines.push(`📅 ${hang.name} — help pick a time`)
+      if (synthesis?.recommendedTime?.date) {
+        const { date, hour } = synthesis.recommendedTime
+        const d = new Date(date + 'T00:00:00')
+        const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]
+        const timeStr = hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`
+        lines.push(`✨ Best so far: ${dayName} ${d.getDate()}, ${timeStr}`)
+      }
+      if (hang.location) lines.push(`📍 ${hang.location.length > 80 ? hang.location.slice(0, 80) + '…' : hang.location}`)
+      const respondedCount = responded.length
+      const missingCount = missing.length
+      if (respondedCount > 0 || missingCount > 0) {
+        const parts: string[] = []
+        if (respondedCount > 0) parts.push(`${respondedCount} in so far`)
+        if (missingCount > 0) parts.push(`${missingCount} haven't replied`)
+        lines.push(`👋 ${parts.join(' · ')}`)
+      }
+      lines.push(`🔗 Fill in when you're free: ${url}`)
+    }
+
+    const summary = lines.join('\n')
+    try {
+      // Prefer native share sheet on mobile (iOS share → Messages, Messenger, WhatsApp, etc.)
+      if (navigator.share) {
+        await navigator.share({ title: hang.name, text: summary })
+      } else {
+        await navigator.clipboard.writeText(summary)
+        showToast('Summary copied — paste into your group chat', 'success')
+      }
+    } catch (err) {
+      // User cancelled share sheet OR clipboard blocked — fall back to manual copy.
+      if ((err as Error)?.name !== 'AbortError') {
+        try {
+          await navigator.clipboard.writeText(summary)
+          showToast('Summary copied', 'success')
+        } catch {
+          showToast('Could not copy summary', 'error')
+        }
+      }
+    }
+  }
+
   const removeParticipant = async (participantId: string) => {
-    if (!confirm('Remove this person? Their availability, votes, and comments will be deleted.')) return
-    await fetch(`/api/hangs/${id}/participants`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId }) })
+    const ok = await showConfirm({
+      title: 'Remove this person?',
+      message: 'Their availability, votes, and comments will be deleted.',
+      confirmLabel: 'Remove',
+      danger: true,
+    })
+    if (!ok) return
+    await fetch(`/api/hangs/${id}/participants`, { method: "DELETE", headers: authHeaders(), body: JSON.stringify({ participantId }) })
     fetchAll()
   }
 
@@ -189,70 +385,258 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
   const submitTransport = async () => {
     if (!transportMode || !myPid) return
-    await fetch(`/api/hangs/${id}/transport`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: myPid, mode: transportMode, seats: transportSeats }) })
+    await fetch(`/api/hangs/${id}/transport`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ participantId: myPid, mode: transportMode, seats: transportSeats }) })
     fetch(`/api/hangs/${id}/transport`).then(r => r.json()).then(setTransport)
   }
 
   const addBringItem = async () => {
-    if (!newBringItem.trim()) return
-    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'add', item: newBringItem }) })
+    const itemText = newBringItem.trim()
+    if (!itemText) return
+    const prev = bringList
+    // Optimistic: show the new item immediately with a negative tempId so we
+    // can swap it out when the real row comes back from the server.
+    const tempId = -Date.now()
+    setBringList(curr => [...curr, { id: tempId, item: itemText, claimedBy: [], parent_id: null }])
     setNewBringItem("")
-    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
+    try {
+      const res = await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'add', item: itemText }) })
+      if (!res.ok) throw new Error('add failed')
+      const next = await fetch(`/api/hangs/${id}/bring-list`).then(r => r.json())
+      if (Array.isArray(next)) setBringList(next)
+    } catch {
+      setBringList(prev)
+      setNewBringItem(itemText)
+      showToast('Could not add item', 'error')
+    }
   }
 
   const claimItem = async (itemId: number) => {
     if (!myPid) return
-    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'claim', itemId, participantId: myPid }) })
-    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
+    const myName = participants.find((p: any) => p.id === myPid)?.name || 'You'
+    const prev = bringList
+    // Optimistic: add me to claimedBy immediately so the tap feels instant.
+    setBringList(curr => curr.map((it: any) => it.id === itemId
+      ? { ...it, claimedBy: [...(it.claimedBy || []), { id: myPid, name: myName }] }
+      : it))
+    try {
+      const res = await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'claim', itemId, participantId: myPid }) })
+      if (!res.ok) throw new Error('claim failed')
+      const next = await fetch(`/api/hangs/${id}/bring-list`).then(r => r.json())
+      if (Array.isArray(next)) setBringList(next)
+    } catch {
+      setBringList(prev)
+      showToast('Could not claim item', 'error')
+    }
   }
 
   const unclaimItem = async (itemId: number) => {
     if (!myPid) return
-    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'unclaim', itemId, participantId: myPid }) })
-    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
+    const prev = bringList
+    // Optimistic: remove me from claimedBy immediately.
+    setBringList(curr => curr.map((it: any) => it.id === itemId
+      ? { ...it, claimedBy: (it.claimedBy || []).filter((c: any) => c.id !== myPid) }
+      : it))
+    try {
+      const res = await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'unclaim', itemId, participantId: myPid }) })
+      if (!res.ok) throw new Error('unclaim failed')
+      const next = await fetch(`/api/hangs/${id}/bring-list`).then(r => r.json())
+      if (Array.isArray(next)) setBringList(next)
+    } catch {
+      setBringList(prev)
+      showToast('Could not unclaim item', 'error')
+    }
   }
 
   const removeBringItem = async (itemId: number) => {
-    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'remove', itemId }) })
-    fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
+    const prev = bringList
+    // Optimistic: drop the item (and any children) from local state immediately.
+    setBringList(curr => curr.filter((it: any) => it.id !== itemId && it.parent_id !== itemId))
+    try {
+      const res = await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'remove', itemId }) })
+      if (!res.ok) throw new Error('remove failed')
+      const next = await fetch(`/api/hangs/${id}/bring-list`).then(r => r.json())
+      if (Array.isArray(next)) setBringList(next)
+    } catch {
+      setBringList(prev)
+      showToast('Could not remove item', 'error')
+    }
   }
 
   const addSubItem = async (parentId: number, item: string) => {
     if (!item.trim()) return
-    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'add', item, parentId }) })
+    await fetch(`/api/hangs/${id}/bring-list`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'add', item, parentId }) })
     fetch(`/api/hangs/${id}/bring-list`).then(r => r.json()).then(setBringList)
   }
 
   const addExpense = async () => {
     if (!expenseDesc || !expenseAmount || !myPid) return
-    await fetch(`/api/hangs/${id}/expenses`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description: expenseDesc, amount: parseFloat(expenseAmount), paidBy: myPid }) })
+    await fetch(`/api/hangs/${id}/expenses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ description: expenseDesc, amount: parseFloat(expenseAmount), paidBy: myPid }) })
     setExpenseDesc(""); setExpenseAmount(""); setShowExpenseForm(false)
     fetch(`/api/hangs/${id}/expenses`).then(r => r.json()).then(setExpenseData)
   }
 
   const createPoll = async () => {
     if (!pollQuestion || pollOptions.filter(o => o.trim()).length < 2 || !myPid) return
-    await fetch(`/api/hangs/${id}/polls`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'create', question: pollQuestion, options: pollOptions.filter(o => o.trim()), participantId: myPid }) })
+    await fetch(`/api/hangs/${id}/polls`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'create', question: pollQuestion, options: pollOptions.filter(o => o.trim()), participantId: myPid }) })
     setPollQuestion(""); setPollOptions(["", ""]); setShowPollForm(false)
     fetch(`/api/hangs/${id}/polls`).then(r => r.json()).then(setPolls)
   }
 
   const votePoll = async (optionId: number) => {
     if (!myPid) return
-    await fetch(`/api/hangs/${id}/polls`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'vote', optionId, participantId: myPid }) })
-    fetch(`/api/hangs/${id}/polls`).then(r => r.json()).then(setPolls)
+    const prev = polls
+    // Optimistic: bump the chosen option's vote count and flip myVote so the
+    // UI reacts instantly. Server returns the authoritative totals after.
+    setPolls(curr => curr.map((poll: any) => {
+      if (!poll.options?.some((o: any) => o.id === optionId)) return poll
+      const prevVote = poll.myVote
+      return {
+        ...poll,
+        myVote: optionId,
+        options: poll.options.map((o: any) => {
+          let count = o.votes || 0
+          if (o.id === optionId && prevVote !== optionId) count += 1
+          if (o.id === prevVote && prevVote !== optionId) count = Math.max(0, count - 1)
+          return { ...o, votes: count }
+        }),
+      }
+    }))
+    try {
+      const res = await fetch(`/api/hangs/${id}/polls`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'vote', optionId, participantId: myPid }) })
+      if (!res.ok) throw new Error('vote failed')
+      const next = await fetch(`/api/hangs/${id}/polls`).then(r => r.json())
+      if (Array.isArray(next)) setPolls(next)
+    } catch {
+      setPolls(prev)
+      showToast('Could not save vote', 'error')
+    }
   }
 
   const sendReaction = async (emoji: string) => {
     if (!myPid) return
-    await fetch(`/api/hangs/${id}/reactions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: myPid, emoji }) })
-    fetch(`/api/hangs/${id}/reactions`).then(r => r.json()).then(setReactions)
+    const prev = reactions
+    // Optimistic: append the reaction immediately so the emoji fly-in feels live.
+    setReactions(curr => [...curr, { participantId: myPid, participant_id: myPid, emoji, createdAt: Date.now() }])
+    try {
+      const res = await fetch(`/api/hangs/${id}/reactions`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ participantId: myPid, emoji }) })
+      if (!res.ok) throw new Error('reaction failed')
+      const next = await fetch(`/api/hangs/${id}/reactions`).then(r => r.json())
+      if (Array.isArray(next)) setReactions(next)
+    } catch {
+      setReactions(prev)
+      // Reactions are low-stakes; keep the toast quiet here.
+    }
   }
 
   const submitRsvp = async (status: string) => {
     if (!myPid) return
-    await fetch(`/api/hangs/${id}/rsvp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: myPid, status }) })
-    fetch(`/api/hangs/${id}/rsvp`).then(r => r.json()).then(setRsvps)
+    const prev = rsvps
+    // Optimistic: bump my RSVP in the local list so the pill feels instant.
+    setRsvps(curr => {
+      const filtered = curr.filter((r: any) => r.participantId !== myPid && r.participant_id !== myPid)
+      return [...filtered, { participantId: myPid, participant_id: myPid, status }]
+    })
+    try {
+      const res = await fetch(`/api/hangs/${id}/rsvp`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ participantId: myPid, status }) })
+      if (!res.ok) throw new Error('rsvp failed')
+      const next = await fetch(`/api/hangs/${id}/rsvp`).then(r => r.json())
+      if (Array.isArray(next)) setRsvps(next)
+    } catch {
+      setRsvps(prev)
+      showToast('Could not save RSVP', 'error')
+    }
+  }
+
+  // ── Creator admin handlers ──
+  const patchField = async (field: string, value: string | boolean) => {
+    const res = await fetch(`/api/hangs/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ [field]: value }),
+    })
+    if (res.ok) {
+      setEditingField(null)
+      setEditValue('')
+      fetchState()
+    } else {
+      showToast('Failed to save change', 'error')
+    }
+  }
+
+  const addActivity = async () => {
+    if (!newActivityName.trim()) return
+    const res = await fetch(`/api/hangs/${id}/activities`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name: newActivityName.trim(), costEstimate: newActivityCost.trim() }),
+    })
+    if (res.ok) {
+      setNewActivityName('')
+      setNewActivityCost('')
+      fetchState()
+    } else {
+      showToast('Failed to add activity', 'error')
+    }
+  }
+
+  const removeActivity = async (activityId: number, activityName: string, hasVotes: boolean) => {
+    const ok = await showConfirm({
+      title: `Remove "${activityName}"?`,
+      message: hasVotes ? 'Existing votes will be deleted.' : 'This will take it off the board.',
+      confirmLabel: 'Remove',
+      danger: true,
+    })
+    if (!ok) return
+    const res = await fetch(`/api/hangs/${id}/activities`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+      body: JSON.stringify({ activityId }),
+    })
+    if (res.ok) fetchState()
+    else showToast('Failed to remove activity', 'error')
+  }
+
+  const settingsAction = async (action: 'lock' | 'unlock' | 'cancel' | 'uncancel') => {
+    const res = await fetch(`/api/hangs/${id}/settings`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ action }),
+    })
+    if (res.ok) {
+      fetchState()
+      showToast(`Hang ${action}ed`, 'success')
+    } else {
+      showToast(`Failed to ${action}`, 'error')
+    }
+  }
+
+  const forceConfirmSlot = async (date: string, hour: number) => {
+    const ok = await showConfirm({
+      title: 'Lock this slot in as host?',
+      message: 'This bypasses the majority vote and locks the plan for everyone.',
+      confirmLabel: 'Lock it in',
+    })
+    if (!ok) return
+    const recActivity = synthesis?.recommendedActivity?.name || ''
+    const res = await fetch(`/api/hangs/${id}/confirm`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ action: 'force', date, hour, activityName: recActivity }),
+    })
+    if (res.ok) {
+      setShowConfetti(true)
+      setTimeout(() => setShowConfetti(false), 3000)
+      fetchState()
+    } else {
+      showToast('Failed to confirm', 'error')
+    }
+  }
+
+  const copyNudgeMessage = () => {
+    const names = missing.map((p: any) => p.name).join(', ')
+    navigator.clipboard.writeText(`Hey ${names}! We're planning "${hang.name}" — fill in your availability: ${window.location.origin}/h/${id}`)
+    setNudgeCopied(true)
+    setTimeout(() => setNudgeCopied(false), 2000)
   }
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -260,7 +644,18 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     if (!file || !myPid) return
     const reader = new FileReader()
     reader.onload = async () => {
-      await fetch(`/api/hangs/${id}/photos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantId: myPid, data: reader.result }) })
+      let data = reader.result as string
+      // Strip EXIF (including GPS) from JPEGs before upload. Partiful had this
+      // exact leak in Oct 2025 — do not skip.
+      try {
+        if (data.startsWith('data:image/jpeg')) {
+          const piexif = (await import('piexifjs')).default
+          data = piexif.remove(data)
+        }
+      } catch (err) {
+        console.warn('EXIF strip failed, continuing:', err)
+      }
+      await fetch(`/api/hangs/${id}/photos`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ data }) })
       fetch(`/api/hangs/${id}/photos`).then(r => r.json()).then(setPhotos)
     }
     reader.readAsDataURL(file)
@@ -280,15 +675,175 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const myParticipant = participants.find((p: any) => p.id === myPid)
   const hasFilledAvailability = myParticipant?.hasResponded
 
+  const firmlyIn = commitment?.aggregate?.in || 0
+  const isLocked = !!hang.locked_at
+  const isCancelled = !!hang.cancelled_at
+
   return (
     <div style={{ maxWidth: 560, margin: '0 auto', padding: '16px 20px 100px' }}>
       {/* Confetti */}
       {showConfetti && <Confetti />}
 
+      {/* ═══════════ Admin header band (creator only) ═══════════ */}
+      {isCreator && (
+        <div style={{
+          margin: '-16px -20px 20px',
+          padding: '14px 20px',
+          background: 'var(--maybe-light)',
+          borderBottom: '2px solid var(--accent)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 10px', background: 'var(--accent)', color: 'var(--accent-text)',
+                borderRadius: 20, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)',
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+                whiteSpace: 'nowrap',
+              }}>
+                Hosting
+              </span>
+              <span style={{ fontSize: 12, color: '#8a6d10', fontWeight: 600, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+                {responded.length}/{participants.length} responded
+                {firmlyIn > 0 && ` · ${firmlyIn} firmly in`}
+              </span>
+              {isLocked && (
+                <span style={{ padding: '2px 8px', background: 'var(--surface-dim)', borderRadius: 4, fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>
+                  LOCKED
+                </span>
+              )}
+              {isCancelled && (
+                <span style={{ padding: '2px 8px', background: '#fef2f2', borderRadius: 4, fontSize: 10, fontWeight: 700, color: 'var(--error)' }}>
+                  CANCELLED
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                onClick={() => {
+                  const url = `${window.location.origin}/h/${id}`
+                  if (navigator.share) navigator.share({ title: hang.name, url })
+                  else { navigator.clipboard.writeText(url); showToast('Link copied', 'success') }
+                }}
+                title="Share link"
+                style={{
+                  padding: '6px 10px', background: 'var(--surface)',
+                  border: '1px solid var(--border-light)', borderRadius: 6,
+                  cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)',
+                }}
+              >
+                Share
+              </button>
+              <button
+                onClick={copySummary}
+                title="Copy a plain-text summary for Messenger, WhatsApp, or iMessage"
+                style={{
+                  padding: '6px 10px', background: 'var(--accent-light, var(--surface))',
+                  border: '1px solid var(--accent)', borderRadius: 6,
+                  cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--accent-text, var(--text-primary))',
+                }}
+              >
+                Copy for chat
+              </button>
+              {missing.length > 0 && (
+                <button
+                  onClick={() => setShowPendingList(v => !v)}
+                  style={{
+                    padding: '6px 10px', background: 'var(--surface)',
+                    border: '1px solid var(--border-light)', borderRadius: 6,
+                    cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--celebrate)',
+                  }}
+                >
+                  Nudge ({missing.length})
+                </button>
+              )}
+              <button
+                onClick={() => setShowSettings(true)}
+                title="Settings"
+                style={{
+                  padding: '6px 10px', background: 'var(--surface)',
+                  border: '1px solid var(--border-light)', borderRadius: 6,
+                  cursor: 'pointer', fontSize: 14,
+                }}
+              >
+                ⚙
+              </button>
+            </div>
+          </div>
+
+          {/* Inline pending list expand */}
+          {showPendingList && missing.length > 0 && (
+            <div style={{ marginTop: 12, padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Still waiting on
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {missing.map((p: any) => (
+                  <span key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: 'var(--surface-dim)', borderRadius: 16, fontSize: 12, fontWeight: 600 }}>
+                    {p.name}
+                    <button
+                      onClick={() => removeParticipant(p.id)}
+                      title="Mark as not coming"
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer', padding: 0, marginLeft: 2, lineHeight: 1 }}
+                    >×</button>
+                  </span>
+                ))}
+              </div>
+              <button
+                onClick={copyNudgeMessage}
+                style={{
+                  width: '100%', padding: 8, fontSize: 12, fontWeight: 600,
+                  color: 'var(--celebrate)', background: '#FFF3EC', border: 'none',
+                  borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-display)',
+                }}
+              >
+                {nudgeCopied ? '✓ Copied — paste into your group chat' : 'Copy nudge message'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em' }}>{hang.name}</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+        {isCreator && editingField === 'name' ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              value={editValue}
+              onChange={e => setEditValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') patchField('name', editValue)
+                if (e.key === 'Escape') setEditingField(null)
+              }}
+              autoFocus
+              maxLength={120}
+              className="input"
+              style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-display)' }}
+            />
+            <button onClick={() => patchField('name', editValue)} className="btn-primary" style={{ width: 'auto', padding: '10px 16px', fontSize: 13 }}>Save</button>
+            <button onClick={() => setEditingField(null)} style={{ padding: '10px 14px', background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+          </div>
+        ) : (
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 800, letterSpacing: '-0.03em', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {hang.name}
+            {isCreator && (
+              <button
+                onClick={() => { setEditingField('name'); setEditValue(hang.name) }}
+                title="Edit name"
+                style={{ padding: 4, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.4, fontSize: 14 }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '1' }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = '0.4' }}
+              >
+                ✎
+              </button>
+            )}
+          </h1>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>
             {participants.length} joined / {responded.length} responded
           </span>
@@ -297,6 +852,22 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               {countdown} to go
             </span>
           )}
+          {(() => {
+            const d = formatDeadline(hang.response_deadline)
+            if (!d) return null
+            const bg = d.closed ? 'var(--surface-dim)' : d.urgent ? '#fef2f2' : 'var(--surface-dim)'
+            const color = d.closed ? 'var(--text-muted)' : d.urgent ? 'var(--error)' : 'var(--text-secondary)'
+            const border = d.closed ? 'var(--border-light)' : d.urgent ? 'var(--error)' : 'var(--border-light)'
+            return (
+              <span style={{
+                fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)',
+                color, background: bg, border: `1px solid ${border}`,
+                padding: '2px 10px', borderRadius: 6,
+              }}>
+                ⏰ {d.text}
+              </span>
+            )
+          })()}
         </div>
       </div>
 
@@ -490,7 +1061,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               </div>
               <button
                 onClick={async () => {
-                  await fetch(`/api/hangs/${id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: 'unconfirm' }) })
+                  await fetch(`/api/hangs/${id}/confirm`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'unconfirm' }) })
                   fetchAll()
                 }}
                 style={{ marginTop: 8, width: '100%', padding: 8, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
@@ -561,57 +1132,126 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
       {/* Who's in + nudge */}
       <div style={{ marginBottom: 24 }}>
-        <div className="label" style={{ marginBottom: 10 }}>
+        <div className="label" style={{ marginBottom: 8 }}>
           Who's in ({responded.length} responded{missing.length > 0 ? ` / ${missing.length} waiting` : ''})
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {participants.map((p: any) => (
-            <div key={p.id} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
-              background: p.hasResponded ? 'var(--surface)' : 'var(--surface-dim)',
-              borderRadius: 'var(--radius-md)', border: `1px solid ${p.hasResponded ? 'var(--border-light)' : 'var(--border)'}`,
-              opacity: p.hasResponded ? 1 : 0.6,
-            }}>
-              <div style={{ width: 24, height: 24, borderRadius: '50%', background: p.hasResponded ? 'var(--accent)' : 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: p.hasResponded ? 'var(--accent-text)' : 'var(--text-muted)' }}>
-                {p.name.charAt(0).toUpperCase()}
+
+        {/* Response progress bar — visual signal for how complete the hang is */}
+        {participants.length > 0 && (
+          <div
+            role="progressbar"
+            aria-label={`${responded.length} of ${participants.length} responded`}
+            aria-valuenow={responded.length}
+            aria-valuemin={0}
+            aria-valuemax={participants.length}
+            style={{
+              height: 6, width: '100%', background: 'var(--surface-dim)',
+              borderRadius: 4, marginBottom: 14, overflow: 'hidden',
+            }}
+          >
+            <div style={{
+              height: '100%',
+              width: `${Math.round((responded.length / Math.max(1, participants.length)) * 100)}%`,
+              background: responded.length === participants.length ? 'var(--free)' : 'var(--accent)',
+              borderRadius: 4,
+              transition: 'width 0.35s cubic-bezier(0.25, 0.1, 0.25, 1)',
+            }} />
+          </div>
+        )}
+
+        {/* Commitment breakdown */}
+        {commitment && (commitment.aggregate.in + commitment.aggregate.probably + commitment.aggregate.cant) > 0 && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            {commitment.aggregate.in > 0 && (
+              <div style={{ padding: '6px 12px', background: 'var(--free-light)', color: '#1a7a3a', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
+                🔥 {commitment.aggregate.in} in
               </div>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
-              {!p.hasResponded && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>pending</span>}
-              {isCreator && p.id !== creatorPid && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); removeParticipant(p.id) }}
-                  style={{ fontSize: 14, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, marginLeft: 2 }}
-                >&times;</button>
-              )}
-            </div>
-          ))}
+            )}
+            {commitment.aggregate.probably > 0 && (
+              <div style={{ padding: '6px 12px', background: 'var(--maybe-light)', color: '#8a6d10', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
+                👀 {commitment.aggregate.probably} probably
+              </div>
+            )}
+            {commitment.aggregate.cant > 0 && (
+              <div style={{ padding: '6px 12px', background: '#fef2f2', color: 'var(--error)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
+                😔 {commitment.aggregate.cant} can't
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {participants.map((p: any) => {
+            const level = commitment?.byParticipant?.[p.id]
+            const levelMark = level === 'in' ? '🔥' : level === 'probably' ? '👀' : level === 'cant' ? '😔' : ''
+            return (
+              <div key={p.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+                background: p.hasResponded ? 'var(--surface)' : 'var(--surface-dim)',
+                borderRadius: 'var(--radius-md)', border: `1px solid ${p.hasResponded ? 'var(--border-light)' : 'var(--border)'}`,
+                opacity: p.hasResponded ? 1 : 0.6,
+              }}>
+                <div style={{ width: 24, height: 24, borderRadius: '50%', background: p.hasResponded ? 'var(--accent)' : 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: p.hasResponded ? 'var(--accent-text)' : 'var(--text-muted)' }}>
+                  {p.name.charAt(0).toUpperCase()}
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
+                {levelMark && <span style={{ fontSize: 14 }} title={level}>{levelMark}</span>}
+                {p.dietary && <span style={{ fontSize: 10, padding: '2px 6px', background: 'var(--surface-dim)', borderRadius: 4, color: 'var(--text-muted)' }}>{p.dietary}</span>}
+                {!p.hasResponded && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>pending</span>}
+                {isCreator && p.id !== creatorPid && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeParticipant(p.id) }}
+                    style={{ fontSize: 14, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', lineHeight: 1, marginLeft: 2 }}
+                  >&times;</button>
+                )}
+              </div>
+            )
+          })}
         </div>
         {missing.length > 0 && (
           <button onClick={nudge} style={{ marginTop: 10, width: '100%', padding: 10, fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-display)', color: 'var(--celebrate)', background: '#FFF3EC', border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer' }}>
             {nudgeCopied ? 'Nudge message copied!' : `Nudge ${missing.map((p: any) => p.name).join(', ')}`}
           </button>
         )}
+
+        {/* Soft warning on confirm if fewer than 3 "in" commitments */}
+        {commitment && hang.status !== 'confirmed' && commitment.aggregate.in < 3 && responded.length >= 3 && (
+          <div style={{ marginTop: 10, padding: '10px 14px', background: 'var(--maybe-light)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: '#8a6d10', fontWeight: 500 }}>
+            Heads up: only {commitment.aggregate.in} {commitment.aggregate.in === 1 ? 'person is' : 'people are'} a hard yes. You might want to wait for firmer commitments before locking in.
+          </div>
+        )}
       </div>
 
       {/* Availability heatmap */}
       {heatmap && dates.length > 0 && (
         <div className="card" style={{ padding: 16, marginBottom: 24, overflowX: 'auto', position: 'relative' }}>
-          <div className="label" style={{ marginBottom: 10 }}>Availability heatmap</div>
-          <div style={{ display: 'inline-grid', gridTemplateColumns: `54px repeat(${dates.length}, 48px)`, gap: 2 }}>
-            <div />
-            {dates.map(d => <div key={d} className="grid-header">{formatDay(d)}</div>)}
-            {HOURS.map(h => (
-              <div key={h} style={{ display: 'contents' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6 }}>{formatHour(h)}</div>
+          <div className="label" id={`heatmap-label-${id}`} style={{ marginBottom: 10 }}>Availability heatmap</div>
+          <div role="table" aria-labelledby={`heatmap-label-${id}`} style={{ display: 'inline-grid', gridTemplateColumns: `54px repeat(${dates.length}, 48px)`, gap: 2 }}>
+            <div role="row" style={{ display: 'contents' }}>
+              <div role="columnheader" aria-hidden="true" />
+              {dates.map(d => <div key={d} role="columnheader" className="grid-header">{formatDay(d)}</div>)}
+            </div>
+            {HOURS.map(h => {
+              const hourLabel = formatHour(h)
+              return (
+              <div key={h} role="row" style={{ display: 'contents' }}>
+                <div role="rowheader" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6 }}>{hourLabel}</div>
                 {dates.map(d => {
                   const key = `${d}|${h}`
                   const cell = heatmap.heatmap[key]
                   const ratio = cell?.ratio || 0
                   const bg = ratio === 0 ? 'var(--surface-dim)' : ratio >= 0.8 ? '#22A85280' : ratio >= 0.5 ? '#34C26A40' : ratio >= 0.25 ? '#F5C84240' : '#E8E3D920'
                   const isHovered = hoverSlot === key
+                  const dayObj = new Date(d + 'T00:00:00')
+                  const fullDay = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayObj.getDay()]
+                  const cellLabel = cell && cell.total > 0
+                    ? `${fullDay} ${hourLabel}: ${cell.total} of ${cell.maxTotal || cell.total} people available`
+                    : `${fullDay} ${hourLabel}: no one yet`
                   return (
                     <div
                       key={key}
+                      role="cell"
+                      aria-label={cellLabel}
                       onMouseEnter={() => setHoverSlot(key)}
                       onMouseLeave={() => setHoverSlot(null)}
                       onClick={() => setHoverSlot(hoverSlot === key ? null : key)}
@@ -631,13 +1271,14 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   )
                 })}
               </div>
-            ))}
+            )})}
           </div>
 
           {/* Tooltip */}
           {hoverSlot && heatmap.heatmap[hoverSlot]?.total > 0 && (() => {
             const cell = heatmap.heatmap[hoverSlot]
             const [date, hourStr] = hoverSlot.split('|')
+            const hourNum = parseInt(hourStr)
             return (
               <div style={{
                 marginTop: 12, padding: '12px 16px',
@@ -645,7 +1286,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                 borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)',
               }}>
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
-                  {formatDay(date)} {formatHour(parseInt(hourStr))}
+                  {formatDay(date)} {formatHour(hourNum)}
                 </div>
                 {cell.freeNames?.length > 0 && (
                   <div style={{ marginBottom: 4 }}>
@@ -658,6 +1299,21 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                     <span style={{ fontSize: 12, fontWeight: 600, color: '#B8940F' }}>Maybe: </span>
                     <span style={{ fontSize: 13 }}>{cell.maybeNames.join(', ')}</span>
                   </div>
+                )}
+                {/* Creator force-confirm */}
+                {isCreator && hang.status !== 'confirmed' && !isLocked && !isCancelled && (
+                  <button
+                    onClick={() => forceConfirmSlot(date, hourNum)}
+                    style={{
+                      marginTop: 10, width: '100%', padding: '8px 12px',
+                      background: 'var(--accent)', color: 'var(--accent-text)',
+                      border: 'none', borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                      fontFamily: 'var(--font-display)',
+                    }}
+                  >
+                    Confirm this slot as host
+                  </button>
                 )}
               </div>
             )
@@ -672,6 +1328,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           {sortedActivities.map((a: any) => {
             const isTopPick = a.id === topActivityId
             const outdoor = isOutdoor(a.name)
+            const hasVotes = (a.ups || 0) + (a.mehs || 0) + (a.downs || 0) > 0
             return (
               <div key={a.id} className="card" style={{ padding: '14px 18px', border: isTopPick ? '2px solid var(--accent)' : '1px solid var(--border-light)', position: 'relative' }}>
                 {isTopPick && (
@@ -681,11 +1338,20 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15 }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', gap: 6 }}>
                     {a.name}
-                    {outdoor && rainWarning && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--error)' }} title="Rain expected">&#9748;</span>}
+                    {outdoor && rainWarning && <span style={{ fontSize: 12, color: 'var(--error)' }} title="Rain expected">&#9748;</span>}
                   </span>
-                  {a.cost_estimate && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)' }}>{a.cost_estimate}</span>}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {a.cost_estimate && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)' }}>{a.cost_estimate}</span>}
+                    {isCreator && (
+                      <button
+                        onClick={() => removeActivity(a.id, a.name, hasVotes)}
+                        title="Remove activity"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, padding: 0, lineHeight: 1 }}
+                      >×</button>
+                    )}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', gap: 12, fontSize: 13, marginTop: 2 }}>
                   <span style={{ color: 'var(--success)', fontWeight: 600 }}>{a.ups || 0} keen</span>
@@ -696,6 +1362,31 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             )
           })}
         </div>
+        {/* Creator: add activity mid-flight */}
+        {isCreator && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <input
+              type="text"
+              value={newActivityName}
+              onChange={e => setNewActivityName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addActivity()}
+              placeholder="Add an activity…"
+              maxLength={60}
+              className="input"
+              style={{ flex: 1, padding: '10px 14px', fontSize: 14 }}
+            />
+            <input
+              type="text"
+              value={newActivityCost}
+              onChange={e => setNewActivityCost(e.target.value)}
+              placeholder="$/person"
+              maxLength={40}
+              className="input"
+              style={{ width: 100, padding: '10px 14px', fontSize: 13, fontFamily: 'var(--font-mono)' }}
+            />
+            <button onClick={addActivity} className="btn-primary" style={{ width: 'auto', padding: '10px 16px', fontSize: 13 }}>Add</button>
+          </div>
+        )}
       </div>
 
       </SectionGroup>
@@ -706,6 +1397,16 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {/* Bring list — supports sub-items + multi-claim */}
       <div className="card" style={{ padding: 20, marginBottom: 24 }}>
         <div className="label" style={{ marginBottom: 12 }}>Bring list</div>
+        {bringList.length === 0 && (
+          <div style={{
+            padding: '16px 14px', marginBottom: 14, textAlign: 'center',
+            background: 'var(--surface-dim)', borderRadius: 'var(--radius-sm)',
+            border: '1px dashed var(--border-light)',
+            fontSize: 13, color: 'var(--text-muted)',
+          }}>
+            Nothing on the bring list yet. Add the first thing below.
+          </div>
+        )}
         {bringList.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
             {bringList.map((item: any) => {
@@ -853,8 +1554,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         )}
       </div>
 
-      {/* Transport (after confirmed) */}
-      {hang.status === 'confirmed' && (
+      {/* Transport — visible during planning and after */}
+      {true && (
         <div className="card" style={{ padding: 20, marginBottom: 24 }}>
           <div className="label" style={{ marginBottom: 12 }}>Transport</div>
           {transport.length > 0 && (
@@ -969,7 +1670,14 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             ))}
           </div>
         ) : (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>No comments yet.</p>
+          <div style={{
+            padding: '14px', marginBottom: 14, textAlign: 'center',
+            background: 'var(--surface-dim)', borderRadius: 'var(--radius-sm)',
+            border: '1px dashed var(--border-light)',
+            fontSize: 13, color: 'var(--text-muted)',
+          }}>
+            {myPid ? 'Be the first to say something.' : 'No comments yet.'}
+          </div>
         )}
         {myPid && (
           <div style={{ display: 'flex', gap: 8 }}>
@@ -983,6 +1691,18 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {isPast && (
         <div className="card" style={{ padding: 20, marginBottom: 24 }}>
           <div className="label" style={{ marginBottom: 12 }}>Recap {photos.length > 0 && `(${photos.length} photos)`}</div>
+          {photos.length === 0 && (
+            <div style={{
+              padding: '20px 14px', marginBottom: 14, textAlign: 'center',
+              background: 'var(--surface-dim)', borderRadius: 'var(--radius-sm)',
+              border: '1px dashed var(--border-light)',
+            }}>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>📸</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                No photos yet. Drop the first one to kick off the recap.
+              </div>
+            </div>
+          )}
           {photos.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 14 }}>
               {photos.map((ph: any) => (
@@ -1023,10 +1743,57 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
       {myPid && (
         <button
-          onClick={() => { localStorage.removeItem(`hangs_participant_${id}`); localStorage.removeItem(`hangs_${id}`); window.location.href = `/h/${id}` }}
+          onClick={() => { localStorage.removeItem(`hangs_participant_${id}`); localStorage.removeItem(`hangs_${id}`); localStorage.removeItem(`hangs_token_${id}`); window.location.href = `/h/${id}` }}
           style={{ display: 'block', width: '100%', textAlign: 'center', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-body)', marginBottom: 16 }}
         >
           Change your response
+        </button>
+      )}
+
+      {/* Participant self-leave (only for non-creators who have a token) */}
+      {myPid && !isCreator && (
+        <button
+          onClick={async () => {
+            const ok = await showConfirm({
+              title: 'Remove yourself from this hang?',
+              message: 'Your availability, votes, and comments will be deleted.',
+              confirmLabel: 'Remove me',
+              danger: true,
+            })
+            if (!ok) return
+            await fetch(`/api/hangs/${id}/participants`, { method: 'DELETE', headers: authHeaders(), body: JSON.stringify({}) })
+            localStorage.removeItem(`hangs_participant_${id}`)
+            localStorage.removeItem(`hangs_token_${id}`)
+            window.location.href = '/'
+          }}
+          style={{ display: 'block', width: '100%', textAlign: 'center', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-body)', marginBottom: 16 }}
+        >
+          Remove me from this hang
+        </button>
+      )}
+
+      {/* Creator delete-hang (permanent) */}
+      {isCreator && (
+        <button
+          onClick={async () => {
+            const ok = await showConfirm({
+              title: `Delete "${hang.name}"?`,
+              message: "Everything — responses, votes, bring list, photos — will be deleted. This can't be undone.",
+              confirmLabel: 'Delete forever',
+              danger: true,
+            })
+            if (!ok) return
+            const res = await fetch(`/api/hangs/${id}`, { method: 'DELETE', headers: authHeaders() })
+            if (res.ok) {
+              localStorage.removeItem(`hangs_${id}`)
+              localStorage.removeItem(`hangs_participant_${id}`)
+              localStorage.removeItem(`hangs_token_${id}`)
+              window.location.href = '/'
+            }
+          }}
+          style={{ display: 'block', width: '100%', textAlign: 'center', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--error)', fontFamily: 'var(--font-body)', marginBottom: 16 }}
+        >
+          Delete this hang
         </button>
       )}
 
@@ -1066,6 +1833,147 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           )}
         </div>
       )}
+
+      {/* ═══════════ Settings modal (creator only) ═══════════ */}
+      {showSettings && isCreator && (
+        <div
+          onClick={() => setShowSettings(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1001, padding: 20,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
+              boxShadow: 'var(--shadow-lg)', padding: 24, maxWidth: 420, width: '100%',
+              maxHeight: '85vh', overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 800 }}>Host controls</h3>
+              <button onClick={() => setShowSettings(false)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1 }}>×</button>
+            </div>
+
+            {/* Description */}
+            <div style={{ marginBottom: 16 }}>
+              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Description</label>
+              <textarea
+                value={editingField === 'description' ? editValue : (hang.description || '')}
+                onChange={e => { setEditingField('description'); setEditValue(e.target.value.slice(0, 300)) }}
+                onBlur={() => { if (editingField === 'description') patchField('description', editValue) }}
+                placeholder="What's the vibe?"
+                rows={2}
+                className="input"
+                style={{ resize: 'vertical', fontSize: 14 }}
+              />
+            </div>
+
+            {/* Theme + dress code */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 6 }}>Theme</label>
+                <input
+                  type="text"
+                  defaultValue={hang.theme || ''}
+                  onBlur={e => { if (e.target.value !== (hang.theme || '')) patchField('theme', e.target.value) }}
+                  maxLength={60}
+                  className="input"
+                  style={{ fontSize: 14 }}
+                />
+              </div>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 6 }}>Dress code</label>
+                <input
+                  type="text"
+                  defaultValue={hang.dress_code || ''}
+                  onBlur={e => { if (e.target.value !== (hang.dress_code || '')) patchField('dressCode', e.target.value) }}
+                  maxLength={60}
+                  className="input"
+                  style={{ fontSize: 14 }}
+                />
+              </div>
+            </div>
+
+            {/* Location */}
+            <div style={{ marginBottom: 16 }}>
+              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Location</label>
+              <input
+                type="text"
+                defaultValue={hang.location || ''}
+                onBlur={e => { if (e.target.value !== (hang.location || '')) patchField('location', e.target.value) }}
+                maxLength={200}
+                className="input"
+                style={{ fontSize: 14 }}
+              />
+            </div>
+
+            {/* Response deadline */}
+            <div style={{ marginBottom: 16 }}>
+              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Response deadline</label>
+              <input
+                type="date"
+                defaultValue={hang.response_deadline || ''}
+                onBlur={e => { if (e.target.value !== (hang.response_deadline || '')) patchField('responseDeadline', e.target.value) }}
+                className="input"
+                style={{ fontSize: 14 }}
+              />
+            </div>
+
+            {/* Lock/unlock toggle */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
+              <div className="label" style={{ marginBottom: 4 }}>Response state</div>
+              {!isLocked ? (
+                <button
+                  onClick={() => settingsAction('lock')}
+                  className="btn-secondary"
+                  style={{ width: '100%', fontSize: 13 }}
+                >
+                  Lock responses (freeze the grid)
+                </button>
+              ) : (
+                <button
+                  onClick={() => settingsAction('unlock')}
+                  className="btn-secondary"
+                  style={{ width: '100%', fontSize: 13, color: 'var(--success)', borderColor: 'var(--success)' }}
+                >
+                  Unlock responses
+                </button>
+              )}
+              {!isCancelled ? (
+                <button
+                  onClick={async () => {
+                    const ok = await showConfirm({
+                      title: 'Cancel this hang?',
+                      message: 'Data stays but no one can respond. You can uncancel later.',
+                      confirmLabel: 'Cancel hang',
+                      danger: true,
+                    })
+                    if (ok) settingsAction('cancel')
+                  }}
+                  style={{ width: '100%', padding: 12, fontSize: 13, fontWeight: 600, color: 'var(--error)', background: '#fef2f2', border: '1px solid var(--error)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'var(--font-display)' }}
+                >
+                  Cancel hang
+                </button>
+              ) : (
+                <button
+                  onClick={() => settingsAction('uncancel')}
+                  className="btn-secondary"
+                  style={{ width: '100%', fontSize: 13, color: 'var(--success)', borderColor: 'var(--success)' }}
+                >
+                  Uncancel
+                </button>
+              )}
+            </div>
+
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+              Changes save automatically when you tap out of each field.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1077,7 +1985,7 @@ function generateDateRange(start: string, end: string): string[] {
   const d = new Date(start + "T00:00:00")
   const e = new Date(end + "T00:00:00")
   while (d <= e) { dates.push(d.toISOString().split("T")[0]); d.setDate(d.getDate() + 1) }
-  return dates.slice(0, 7)
+  return dates.slice(0, 31) // allow up to 31 days; was capped at 7
 }
 
 function weatherIcon(code: number): string {

@@ -1,7 +1,9 @@
 "use client"
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
+import QRCode from "qrcode"
+import { showToast } from "@/components/Toast"
 
 const stepTransition = {
   initial: { opacity: 0, x: 30 },
@@ -65,7 +67,7 @@ type Activity = { name: string; costEstimate: string }
 
 export default function CreatePage() {
   const router = useRouter()
-  const [step, setStep] = useState(0) // 0=template, 1=basics, 2=activities, 3=review, 4=done
+  const [step, setStep] = useState(0) // 0=template, 1=basics, 2=activities, 3=extras, 4=review, 5=done
   const [template, setTemplate] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [creatorName, setCreatorName] = useState("")
@@ -79,12 +81,31 @@ export default function CreatePage() {
   const [customCost, setCustomCost] = useState("")
   const [location, setLocation] = useState("")
   const [duration, setDuration] = useState(2)
+  // Phase 2: creator-seeded extras (all optional)
+  const [description, setDescription] = useState("")
+  const [theme, setTheme] = useState("")
+  const [dressCode, setDressCode] = useState("")
+  const [responseDeadline, setResponseDeadline] = useState("")
+  const [askDietary, setAskDietary] = useState(false)
+  const [customQuestion, setCustomQuestion] = useState("")
+  const [bringListSeed, setBringListSeed] = useState<string[]>([])
+  const [newBringItem, setNewBringItem] = useState("")
   const [showAllSuggestions, setShowAllSuggestions] = useState(false)
   const [loading, setLoading] = useState(false)
   const [shareUrl, setShareUrl] = useState("")
   const [hangId, setHangId] = useState("")
+  const [qrDataUrl, setQrDataUrl] = useState("")
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null)
 
-  const steps = ['Template', 'Basics', 'Activities', 'Review', 'Done']
+  // Generate QR whenever shareUrl changes
+  useEffect(() => {
+    if (!shareUrl) return
+    QRCode.toDataURL(shareUrl, { width: 240, margin: 1, color: { dark: '#1A1A1A', light: '#FAF8F3' } })
+      .then(setQrDataUrl)
+      .catch(err => console.warn('[hangs] QR code generation failed:', err))
+  }, [shareUrl])
+
+  const steps = ['Template', 'Basics', 'Activities', 'Extras', 'Review', 'Done']
 
   const selectTemplate = (tpl: typeof TEMPLATES[0] | null) => {
     if (tpl) {
@@ -120,29 +141,50 @@ export default function CreatePage() {
   }
 
   const handleCreate = async () => {
+    if (loading) return // defensive: prevent accidental double-submit
     setLoading(true)
-    const res = await fetch("/api/hangs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        creatorName,
-        dateMode,
-        dateRangeStart: dateMode === 'range' ? dateStart : undefined,
-        dateRangeEnd: dateMode === 'range' ? dateEnd : undefined,
-        selectedDates: dateMode === 'specific' ? selectedDates.sort() : undefined,
-        activities,
-        template,
-        location: location || undefined,
-        duration,
-      }),
-    })
-    const data = await res.json()
-    setHangId(data.id)
-    setShareUrl(`${window.location.origin}/h/${data.id}`)
-    if (data.creatorId) localStorage.setItem(`hangs_${data.id}`, data.creatorId)
-    setLoading(false)
-    setStep(4)
+    try {
+      const res = await fetch("/api/hangs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          creatorName,
+          dateMode,
+          dateRangeStart: dateMode === 'range' ? dateStart : undefined,
+          dateRangeEnd: dateMode === 'range' ? dateEnd : undefined,
+          selectedDates: dateMode === 'specific' ? selectedDates.sort() : undefined,
+          activities,
+          template,
+          location: location || undefined,
+          duration,
+          description: description || undefined,
+          theme: theme || undefined,
+          dressCode: dressCode || undefined,
+          responseDeadline: responseDeadline || undefined,
+          askDietary: askDietary || undefined,
+          customQuestion: customQuestion || undefined,
+          bringListSeed: bringListSeed.length > 0 ? bringListSeed : undefined,
+        }),
+      })
+      if (!res.ok) throw new Error(`Create failed: ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setHangId(data.id)
+      setShareUrl(`${window.location.origin}/h/${data.id}`)
+      if (data.creatorId) localStorage.setItem(`hangs_${data.id}`, data.creatorId)
+      if (data.creatorToken) localStorage.setItem(`hangs_token_${data.id}`, data.creatorToken)
+      // The creator is also a participant of their own hang — so results page fetches work
+      if (data.creatorId) localStorage.setItem(`hangs_participant_${data.id}`, data.creatorId)
+      // Persist the creator's name globally so their next respond flow prefills.
+      if (creatorName.trim()) localStorage.setItem('hangs_last_name', creatorName.trim())
+      setStep(5)
+    } catch (err) {
+      console.warn('[hangs] create failed:', err)
+      showToast('Could not create — check your connection and try again', 'error')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const copyLink = async () => {
@@ -160,9 +202,9 @@ export default function CreatePage() {
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '16px 24px 48px' }}>
       {/* Progress */}
-      {step < 4 && (
+      {step < 5 && (
         <div className="progress-bar" style={{ marginBottom: 32 }}>
-          {[0,1,2,3].map(s => (
+          {[0,1,2,3,4].map(s => (
             <div key={s} className={`progress-dot ${s <= step ? 'progress-dot-active' : ''}`} />
           ))}
         </div>
@@ -506,9 +548,163 @@ export default function CreatePage() {
         </motion.div>
       )}
 
-      {/* Step 3: Review */}
+      {/* Step 3: Extras (creator-seeded) */}
       {step === 3 && (
         <motion.div key="step3" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div>
+            <h2 className="section-title">Set it up</h2>
+            <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+              All optional. Skip anything that doesn't fit.
+            </p>
+          </div>
+
+          {/* Description / vibe */}
+          <div>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Description</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value.slice(0, 300))}
+              placeholder="What's the vibe? (optional)"
+              rows={3}
+              className="input"
+              style={{ resize: 'vertical', fontFamily: 'var(--font-body)' }}
+            />
+            <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              {description.length}/300
+            </div>
+          </div>
+
+          {/* Theme + dress code */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Theme</label>
+              <input
+                type="text"
+                value={theme}
+                onChange={e => setTheme(e.target.value)}
+                placeholder="e.g. '80s night"
+                maxLength={60}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Dress code</label>
+              <input
+                type="text"
+                value={dressCode}
+                onChange={e => setDressCode(e.target.value)}
+                placeholder="e.g. casual"
+                maxLength={60}
+                className="input"
+              />
+            </div>
+          </div>
+
+          {/* Bring list seed */}
+          <div>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Bring list</label>
+            {bringListSeed.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {bringListSeed.map((item, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px', background: 'var(--accent)', color: 'var(--accent-text)',
+                    borderRadius: 'var(--radius-md)', fontSize: 13, fontWeight: 600,
+                  }}>
+                    {item}
+                    <button
+                      onClick={() => setBringListSeed(prev => prev.filter((_, j) => j !== i))}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--accent-text)', padding: 0, lineHeight: 1 }}
+                    >&times;</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text"
+                value={newBringItem}
+                onChange={e => setNewBringItem(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newBringItem.trim()) {
+                    setBringListSeed(prev => [...prev, newBringItem.trim()])
+                    setNewBringItem("")
+                  }
+                }}
+                placeholder="Speakers, snacks, drinks..."
+                maxLength={100}
+                className="input"
+                style={{ flex: 1 }}
+              />
+              <button
+                onClick={() => {
+                  if (newBringItem.trim()) {
+                    setBringListSeed(prev => [...prev, newBringItem.trim()])
+                    setNewBringItem("")
+                  }
+                }}
+                className="btn-secondary"
+                style={{ padding: '14px 20px' }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Response deadline */}
+          <div>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Response deadline</label>
+            <input
+              type="date"
+              value={responseDeadline}
+              onChange={e => setResponseDeadline(e.target.value)}
+              className="input"
+            />
+          </div>
+
+          {/* Dietary toggle */}
+          <div>
+            <label style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', cursor: 'pointer',
+            }}>
+              <div>
+                <div className="label" style={{ marginBottom: 2 }}>Ask about dietary restrictions</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Guests pick from a dropdown on response</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={askDietary}
+                onChange={e => setAskDietary(e.target.checked)}
+                style={{ width: 18, height: 18, cursor: 'pointer' }}
+              />
+            </label>
+          </div>
+
+          {/* Custom question */}
+          <div>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>One thing to ask guests</label>
+            <input
+              type="text"
+              value={customQuestion}
+              onChange={e => setCustomQuestion(e.target.value)}
+              placeholder="e.g. Are you bringing a +1?"
+              maxLength={200}
+              className="input"
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={() => setStep(2)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
+            <button onClick={() => setStep(4)} className="btn-primary" style={{ flex: 1 }}>Next</button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Step 4: Review */}
+      {step === 4 && (
+        <motion.div key="step4" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <h2 className="section-title">Ready to share</h2>
           <div className="card" style={{ padding: 24 }}>
             <div className="label">Hangout</div>
@@ -582,7 +778,7 @@ export default function CreatePage() {
           </div>
 
           <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={() => setStep(2)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
+            <button onClick={() => setStep(3)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
               onClick={handleCreate}
               disabled={loading}
@@ -595,9 +791,9 @@ export default function CreatePage() {
         </motion.div>
       )}
 
-      {/* Step 4: Done */}
-      {step === 4 && (
-        <motion.div key="step4" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24, textAlign: 'center', paddingTop: 24 }}>
+      {/* Step 5: Done */}
+      {step === 5 && (
+        <motion.div key="step5" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24, textAlign: 'center', paddingTop: 24 }}>
           <div>
             <div style={{
               width: 56,
@@ -618,6 +814,17 @@ export default function CreatePage() {
               Share this link with your group.
             </p>
           </div>
+
+          {/* QR code for in-person sharing */}
+          {qrDataUrl && (
+            <div style={{
+              display: 'flex', justifyContent: 'center', padding: 20,
+              background: 'var(--surface)', border: '1px solid var(--border-light)',
+              borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)',
+            }}>
+              <img src={qrDataUrl} alt="QR code for hang link" width={200} height={200} style={{ display: 'block' }} />
+            </div>
+          )}
 
           <div style={{
             display: 'flex',

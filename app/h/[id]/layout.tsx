@@ -6,9 +6,14 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   try {
     const db = getDb()
     await ensureSchema()
-    const hangRes = await db.execute({ sql: 'SELECT * FROM hangs WHERE id = ?', args: [id] })
+    const [hangRes, pRes] = await db.batch(
+      [
+        { sql: 'SELECT * FROM hangs WHERE id = ?', args: [id] },
+        { sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [id] },
+      ],
+      'read',
+    )
     const hang = hangRes.rows[0]
-    const pRes = await db.execute({ sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [id] })
     const participantCount = (pRes.rows[0].cnt as number) || 0
 
     if (!hang) return { title: 'hangs' }

@@ -1,15 +1,51 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+import { ToastHost } from '@/components/Toast'
+import { ConfirmHost } from '@/components/ui/ConfirmModal'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-body' })
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', weight: ['400', '500'] })
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#FAF8F3',
+}
+
 export const metadata: Metadata = {
-  title: 'hangs — plan your next hangout',
+  title: {
+    default: 'hangs — plan your next hangout',
+    template: '%s · hangs',
+  },
   description: 'Find when everyone is free, vote on what to do, get a plan. One link, 60 seconds.',
-  icons: { icon: '/favicon.svg' },
-  viewport: 'width=device-width, initial-scale=1, viewport-fit=cover',
+  applicationName: 'hangs',
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+    ],
+  },
+  openGraph: {
+    title: 'hangs — plan your next hangout',
+    description: 'One link. Everyone fills in when they\'re free. You get a plan.',
+    type: 'website',
+    siteName: 'hangs',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'hangs — plan your next hangout',
+    description: 'One link. Everyone fills in when they\'re free. You get a plan.',
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'hangs',
+    statusBarStyle: 'default',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -40,6 +76,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </a>
         </header>
         <main style={{ minHeight: '100vh' }}>{children}</main>
+        <ToastHost />
+        <ConfirmHost />
       </body>
     </html>
   )

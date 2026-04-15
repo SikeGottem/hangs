@@ -2,6 +2,7 @@
 import Link from "next/link"
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { formatDeadline } from "@/lib/time"
 
 // ── Animated grid demo: simulates cells filling in ──
 const DEMO_GRID = { cols: 5, rows: 7 }
@@ -170,16 +171,17 @@ export default function Home() {
   const [myHangs, setMyHangs] = useState<any[]>([])
 
   useEffect(() => {
-    // Find hang IDs from localStorage — only show hangs the user is part of
+    // Find hang IDs from localStorage — only show hangs the user is part of.
+    // Whitelist exact patterns so unrelated keys (hangs_last_name, hangs_token_*)
+    // don't leak into the ID list and trigger 404s.
     const ids: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
       if (!key) continue
-      // hangs_XXXX = creator, hangs_participant_XXXX = participant
-      let hangId = ''
-      if (key.startsWith('hangs_participant_')) hangId = key.replace('hangs_participant_', '')
-      else if (key.startsWith('hangs_') && !key.startsWith('hangs_participant_')) hangId = key.replace('hangs_', '')
-      if (hangId && hangId.length >= 6) ids.push(hangId)
+      const participant = key.match(/^hangs_participant_([a-zA-Z0-9]{6,})$/)
+      if (participant) { ids.push(participant[1]); continue }
+      const creator = key.match(/^hangs_([a-zA-Z0-9]{6,})$/)
+      if (creator) ids.push(creator[1])
     }
 
     // Fetch details for each hang
@@ -187,17 +189,49 @@ export default function Home() {
     if (unique.length === 0) return
 
     Promise.all(
-      unique.map(hid =>
-        fetch(`/api/hangs/${hid}`).then(r => r.ok ? r.json() : null).catch(() => null)
-      )
+      unique.map(async hid => {
+        try {
+          const r = await fetch(`/api/hangs/${hid}`)
+          if (r.status === 404) {
+            // Stale localStorage — the hang was deleted server-side. Clean up
+            // so it doesn't keep showing up here and triggering 404s.
+            localStorage.removeItem(`hangs_${hid}`)
+            localStorage.removeItem(`hangs_participant_${hid}`)
+            localStorage.removeItem(`hangs_token_${hid}`)
+            return null
+          }
+          if (!r.ok) return null
+          return await r.json()
+        } catch {
+          return null
+        }
+      })
     ).then(results => {
-      const valid = results.filter(Boolean).map((r: any) => ({
-        id: r.hang.id,
-        name: r.hang.name,
-        status: r.hang.status,
-        participant_count: r.participants?.length || 0,
-        created_at: r.hang.created_at,
-      }))
+      // Figure out which participant is "me" per hang so we can flag
+      // hangs that still need a response from this user.
+      const valid = results.filter(Boolean).map((r: any) => {
+        const myPid = localStorage.getItem(`hangs_participant_${r.hang.id}`) || localStorage.getItem(`hangs_${r.hang.id}`)
+        const me = myPid ? r.participants?.find((p: any) => p.id === myPid) : null
+        const needsResponse = me ? !me.hasResponded : true
+        return {
+          id: r.hang.id,
+          name: r.hang.name,
+          status: r.hang.status,
+          participant_count: r.participants?.length || 0,
+          created_at: r.hang.created_at,
+          response_deadline: r.hang.response_deadline,
+          confirmed_date: r.hang.confirmed_date,
+          needsResponse,
+          isCreator: !!localStorage.getItem(`hangs_${r.hang.id}`),
+        }
+      })
+      // Sort: needs-my-response first, then active, then confirmed, then past.
+      valid.sort((a: any, b: any) => {
+        if (a.needsResponse !== b.needsResponse) return a.needsResponse ? -1 : 1
+        if (a.status === 'confirmed' && b.status !== 'confirmed') return 1
+        if (b.status === 'confirmed' && a.status !== 'confirmed') return -1
+        return (b.created_at || 0) - (a.created_at || 0)
+      })
       setMyHangs(valid)
     })
   }, [])
@@ -342,34 +376,68 @@ export default function Home() {
         >
           <div style={{ maxWidth: 520, margin: '0 auto' }}>
             <div className="label" style={{ marginBottom: 16 }}>Your hangs</div>
-            {myHangs.map((h: any, i: number) => (
-              <motion.div
-                key={h.id}
-                initial={{ opacity: 0, x: -10 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.08, duration: 0.3 }}
-              >
-                <Link href={`/h/${h.id}/results`} style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '14px 0', textDecoration: 'none', color: 'inherit',
-                  borderBottom: '1px solid var(--border-light)',
-                }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15, fontFamily: 'var(--font-display)' }}>{h.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{h.participant_count} people</div>
-                  </div>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6,
-                    ...(h.status === 'confirmed'
-                      ? { color: 'var(--success)', background: 'var(--free-light)' }
-                      : { color: 'var(--text-muted)', background: 'var(--surface-dim)' }),
+            {myHangs.map((h: any, i: number) => {
+              const deadline = formatDeadline(h.response_deadline)
+              // Route new-responders to the fill-in flow; everyone else to results.
+              const href = h.needsResponse ? `/h/${h.id}` : `/h/${h.id}/results`
+              return (
+                <motion.div
+                  key={h.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.08, duration: 0.3 }}
+                >
+                  <Link href={href} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '14px 0', textDecoration: 'none', color: 'inherit',
+                    borderBottom: '1px solid var(--border-light)',
+                    gap: 12,
                   }}>
-                    {h.status === 'confirmed' ? 'Confirmed' : 'Planning'}
-                  </span>
-                </Link>
-              </motion.div>
-            ))}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700, fontSize: 15, fontFamily: 'var(--font-display)' }}>{h.name}</span>
+                        {h.isCreator && (
+                          <span style={{ fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--accent)', background: 'var(--maybe-light)', padding: '1px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>host</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+                        <span>{h.participant_count} people</span>
+                        {deadline && !deadline.closed && (
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', fontWeight: 700,
+                            color: deadline.urgent ? 'var(--error)' : 'var(--text-muted)',
+                          }}>
+                            ⏰ {deadline.text}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {h.needsResponse && h.status !== 'cancelled' ? (
+                      <span style={{
+                        fontSize: 11, fontWeight: 800, padding: '5px 10px', borderRadius: 6,
+                        color: 'var(--accent-text)', background: 'var(--accent)',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        Respond →
+                      </span>
+                    ) : (
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6,
+                        whiteSpace: 'nowrap',
+                        ...(h.status === 'cancelled'
+                          ? { color: 'var(--error)', background: '#fef2f2' }
+                          : h.status === 'confirmed'
+                            ? { color: 'var(--success, #1a7a3a)', background: 'var(--free-light)' }
+                            : { color: 'var(--text-muted)', background: 'var(--surface-dim)' }),
+                      }}>
+                        {h.status === 'cancelled' ? 'Cancelled' : h.status === 'confirmed' ? 'Confirmed' : 'Planning'}
+                      </span>
+                    )}
+                  </Link>
+                </motion.div>
+              )
+            })}
           </div>
         </motion.div>
       )}
