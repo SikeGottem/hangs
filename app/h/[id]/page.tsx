@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, useCallback, use } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { formatDeadline } from "@/lib/time"
+import { OnboardingHero, InlineTip } from "@/components/FirstVisitCoach"
+import GoogleCalendarSync from "@/components/GoogleCalendarSync"
 
 const stepAnim = {
   initial: { opacity: 0, x: 30 },
@@ -192,6 +194,84 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     setSlots(allSlots)
   }
 
+  // Preset filters for the availability grid. Each takes a (date, hour) pair
+  // and returns whether that slot should be marked free. This is the single
+  // biggest friction killer on the respond page — 80% of responders will tap
+  // one of these instead of painting the grid by hand.
+  const PRESETS: { key: string; label: string; emoji: string; match: (d: Date, h: number) => boolean }[] = [
+    { key: 'weekdayEvenings', label: 'Weekday evenings', emoji: '🌙', match: (d, h) => d.getDay() >= 1 && d.getDay() <= 5 && h >= 17 && h <= 22 },
+    { key: 'weekendAllDay',  label: 'Weekend all day',  emoji: '🎉', match: (d, h) => (d.getDay() === 0 || d.getDay() === 6) && h >= 10 && h <= 22 },
+    { key: 'afterWork',      label: 'After work',        emoji: '🍻', match: (d, h) => d.getDay() >= 1 && d.getDay() <= 5 && h >= 18 && h <= 23 },
+    { key: 'anytime',        label: "I'm flexible",     emoji: '✨', match: (_d, _h) => true },
+  ]
+
+  const applyPreset = (presetKey: string) => {
+    if (!hang) return
+    const preset = PRESETS.find(p => p.key === presetKey)
+    if (!preset) return
+    // Range mode: iterate the generated date range. Specific mode: iterate selected_dates.
+    const isSpecific = hang.hang.date_mode === 'specific'
+    const dateList = isSpecific
+      ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
+      : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const newSlots: Record<string, string> = { ...slots }
+    for (const d of dateList) {
+      const dateObj = new Date(d + 'T00:00:00')
+      for (const h of HOURS) {
+        const key = `${d}|${h}`
+        if (preset.match(dateObj, h)) newSlots[key] = 'free'
+      }
+    }
+    setSlots(newSlots)
+    // Remember which preset the user picked for next time.
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('hangs_last_preset', presetKey) } catch { /* ignore */ }
+    }
+    // Haptic confirmation — big state change deserves a pulse.
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([8, 30, 8]) } catch { /* ignore */ }
+    }
+  }
+
+  // Apply the user's previous-hang availability shape if they have one saved.
+  // We store the raw slot pattern by weekday+hour (e.g. "Mon|18" → "free") so
+  // it generalises across hangs with different date ranges.
+  const applyLastHangShape = () => {
+    if (!hang) return
+    if (typeof window === 'undefined') return
+    let pattern: Record<string, string> = {}
+    try {
+      const raw = localStorage.getItem('hangs_last_availability_shape')
+      if (!raw) return
+      pattern = JSON.parse(raw)
+    } catch { return }
+    const isSpecific = hang.hang.date_mode === 'specific'
+    const dateList = isSpecific
+      ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
+      : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    const newSlots: Record<string, string> = { ...slots }
+    for (const d of dateList) {
+      const dayName = dayNames[new Date(d + 'T00:00:00').getDay()]
+      for (const h of HOURS) {
+        const patternKey = `${dayName}|${h}`
+        const status = pattern[patternKey]
+        if (status && status !== 'busy') newSlots[`${d}|${h}`] = status
+      }
+    }
+    setSlots(newSlots)
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([8, 30, 8]) } catch { /* ignore */ }
+    }
+  }
+
+  // Is there a saved availability pattern from a prior hang?
+  const [hasLastShape, setHasLastShape] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try { setHasLastShape(!!localStorage.getItem('hangs_last_availability_shape')) } catch { /* ignore */ }
+  }, [])
+
   const submitAvailability = async () => {
     const slotArray = Object.entries(slots).map(([key, status]) => {
       const [date, hour] = key.split("|")
@@ -203,6 +283,18 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
       body: JSON.stringify({ slots: slotArray }),
     })
+    // Persist the user's availability shape by weekday+hour (not absolute date)
+    // so "same as last time" can rehydrate it into a future hang with a
+    // totally different date range. Only stores free/maybe, not busy.
+    if (typeof window !== 'undefined' && slotArray.length > 0) {
+      const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+      const shape: Record<string, string> = {}
+      for (const s of slotArray) {
+        const dayName = dayNames[new Date(s.date + 'T00:00:00').getDay()]
+        shape[`${dayName}|${s.hour}`] = s.status
+      }
+      try { localStorage.setItem('hangs_last_availability_shape', JSON.stringify(shape)) } catch { /* ignore */ }
+    }
     // If editing, go straight back to results (skip voting)
     if (editPid) {
       localStorage.setItem(`hangs_participant_${id}`, participantId)
@@ -299,6 +391,9 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px' }}>
+      {/* First-visit onboarding — only on step 0, auto-hides after dismiss. */}
+      {step === 0 && !editPid && <OnboardingHero />}
+
       {/* Progress */}
       {step < 6 && (
         <div className="progress-bar" style={{ marginBottom: 28 }}>
@@ -402,8 +497,10 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
           <div>
             <input
               type="text" value={friendName} onChange={e => setFriendName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && friendName.trim()) join() }}
               placeholder="What's your name?"
               className="input"
+              autoComplete="given-name"
               style={{ textAlign: 'center', fontSize: 18 }}
             />
             <button onClick={join} disabled={!friendName.trim()} className="btn-primary" style={{ marginTop: 12 }}>
@@ -495,12 +592,68 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
           <div>
             <h2 className="section-title" style={{ fontSize: 24 }}>When are you free?</h2>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>
-              Tap to cycle: <span style={{ color: 'var(--free)', fontWeight: 600 }}>free</span>
-              {' '}&rarr;{' '}
-              <span style={{ color: 'var(--maybe)', fontWeight: 600 }}>maybe</span>
-              {' '}&rarr; busy
+              Tap a preset or drag the grid to fine-tune.
             </p>
+            <InlineTip
+              storageKey="hangs_tip_grid_v1"
+              headline="drag or tap — both work"
+              body="green = you're in. tap again to cycle free → maybe → busy."
+              show={!editPid}
+            />
           </div>
+
+          {/* Quick-fill presets — 80% of responders never touch the grid */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {hasLastShape && (
+              <button
+                onClick={applyLastHangShape}
+                aria-label="Use same availability as my last hang"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '10px 14px', fontSize: 13, fontWeight: 700,
+                  background: 'var(--accent)', color: 'var(--accent-text)',
+                  border: '1px solid var(--accent)', borderRadius: 'var(--radius-md)',
+                  cursor: 'pointer', fontFamily: 'var(--font-display)',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                ↩︎ Same as last time
+              </button>
+            )}
+            {PRESETS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => applyPreset(p.key)}
+                aria-label={`Prefill availability: ${p.label}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '10px 14px', fontSize: 13, fontWeight: 600,
+                  background: 'var(--surface)', color: 'var(--text-primary)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  cursor: 'pointer', fontFamily: 'var(--font-display)',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--maybe-light)'; e.currentTarget.style.borderColor = 'var(--accent)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+              >
+                <span aria-hidden="true">{p.emoji}</span> {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Google Calendar busy-time import (blocks out conflicts automatically) */}
+          {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && hang.hang.date_range_start && hang.hang.date_range_end && (
+            <GoogleCalendarSync
+              dateRangeStart={hang.hang.date_range_start}
+              dateRangeEnd={hang.hang.date_range_end}
+              hours={HOURS}
+              onBusySlots={(keys) => setSlots(prev => {
+                const next = { ...prev }
+                for (const k of keys) next[k] = 'busy'
+                return next
+              })}
+            />
+          )}
 
           <div
             className="grid-scroll-container"
@@ -592,15 +745,6 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
             </div>
           </div>
 
-          <button onClick={markAllFree} style={{
-            width: '100%', padding: '12px', fontSize: 14, fontWeight: 600,
-            fontFamily: 'var(--font-display)', color: 'var(--free)',
-            background: 'var(--free-light)', border: 'none',
-            borderRadius: 'var(--radius-md)', cursor: 'pointer',
-          }}>
-            I'm down for anything - mark all free
-          </button>
-
           <button onClick={submitAvailability} className="btn-primary">Next</button>
         </motion.div>
       )}
@@ -680,8 +824,45 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
               <div>
                 <h2 className="section-title" style={{ fontSize: 24 }}>What times work?</h2>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>
-                  Tap hours for each day. Green = free, yellow = maybe.
+                  Tap a preset or pick hours per day.
                 </p>
+              </div>
+
+              {/* Same preset chips as range mode */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {hasLastShape && (
+                  <button
+                    onClick={applyLastHangShape}
+                    aria-label="Use same availability as my last hang"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '10px 14px', fontSize: 13, fontWeight: 700,
+                      background: 'var(--accent)', color: 'var(--accent-text)',
+                      border: '1px solid var(--accent)', borderRadius: 'var(--radius-md)',
+                      cursor: 'pointer', fontFamily: 'var(--font-display)',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}
+                  >
+                    ↩︎ Same as last time
+                  </button>
+                )}
+                {PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => applyPreset(p.key)}
+                    aria-label={`Prefill availability: ${p.label}`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '10px 14px', fontSize: 13, fontWeight: 600,
+                      background: 'var(--surface)', color: 'var(--text-primary)',
+                      border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                      cursor: 'pointer', fontFamily: 'var(--font-display)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <span aria-hidden="true">{p.emoji}</span> {p.label}
+                  </button>
+                ))}
               </div>
               {freeDays.sort().map(d => {
                 const date = new Date(d + 'T00:00:00')

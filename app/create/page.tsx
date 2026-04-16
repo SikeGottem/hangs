@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import QRCode from "qrcode"
 import { showToast } from "@/components/Toast"
+import DatePicker, { type DatePickerValue } from "@/components/DatePicker"
 
 const stepTransition = {
   initial: { opacity: 0, x: 30 },
@@ -72,10 +73,26 @@ export default function CreatePage() {
   const [name, setName] = useState("")
   const [creatorName, setCreatorName] = useState("")
   const [dateMode, setDateMode] = useState<'range' | 'specific'>('range')
-  const [dateStart, setDateStart] = useState("")
-  const [dateEnd, setDateEnd] = useState("")
+  // Default the date range to "today → end of weekend" so users don't start
+  // from blank. If it's already Sunday evening, default to "next Fri → Sun".
+  const defaultRange = (() => {
+    const today = new Date()
+    const isoDay = (d: Date) => d.toISOString().split('T')[0]
+    const day = today.getDay() // 0 = Sun, 6 = Sat
+    // Sunday evening: skip ahead to next Friday
+    if (day === 0 && today.getHours() >= 18) {
+      const fri = new Date(today); fri.setDate(today.getDate() + 5)
+      const sun = new Date(today); sun.setDate(today.getDate() + 7)
+      return { start: isoDay(fri), end: isoDay(sun) }
+    }
+    // Otherwise: today → next Sunday (gives at least 2 days, up to 7)
+    const daysToSunday = day === 0 ? 7 : 7 - day
+    const end = new Date(today); end.setDate(today.getDate() + daysToSunday)
+    return { start: isoDay(today), end: isoDay(end) }
+  })()
+  const [dateStart, setDateStart] = useState(defaultRange.start)
+  const [dateEnd, setDateEnd] = useState(defaultRange.end)
   const [selectedDates, setSelectedDates] = useState<string[]>([])
-  const [dateInput, setDateInput] = useState("")
   const [activities, setActivities] = useState<Activity[]>([])
   const [customActivity, setCustomActivity] = useState("")
   const [customCost, setCustomCost] = useState("")
@@ -179,6 +196,23 @@ export default function CreatePage() {
       // Persist the creator's name globally so their next respond flow prefills.
       if (creatorName.trim()) localStorage.setItem('hangs_last_name', creatorName.trim())
       setStep(5)
+
+      // Fire the native share sheet immediately on mobile so the creator goes
+      // from "hang created" → "picking Messenger recipients" in one step, not two.
+      // Skip on desktop (no native share) and if iOS Safari isn't ready yet —
+      // we fire it on a micro-delay so the step 5 confetti has a chance to land.
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        const url = `${window.location.origin}/h/${data.id}`
+        setTimeout(() => {
+          navigator.share({
+            title: name,
+            text: `help plan ${name}`,
+            url,
+          }).catch(() => {
+            // User cancelled the sheet — that's fine, the Done screen still shows.
+          })
+        }, 400)
+      }
     } catch (err) {
       console.warn('[hangs] create failed:', err)
       showToast('Could not create — check your connection and try again', 'error')
@@ -289,94 +323,20 @@ export default function CreatePage() {
               className="input"
             />
           </div>
-          {/* Date mode toggle */}
           <div>
             <label className="label" style={{ display: 'block', marginBottom: 8 }}>When?</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => setDateMode('range')}
-                className={`chip ${dateMode === 'range' ? 'chip-active' : ''}`}
-                style={{ flex: 1, justifyContent: 'center' }}
-              >
-                Date range
-              </button>
-              <button
-                onClick={() => setDateMode('specific')}
-                className={`chip ${dateMode === 'specific' ? 'chip-active' : ''}`}
-                style={{ flex: 1, justifyContent: 'center' }}
-              >
-                Specific days
-              </button>
-            </div>
           </div>
 
-          {/* Date range mode */}
-          {dateMode === 'range' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label className="label" style={{ display: 'block', marginBottom: 8 }}>From</label>
-                <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} className="input" />
-              </div>
-              <div>
-                <label className="label" style={{ display: 'block', marginBottom: 8 }}>To</label>
-                <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} className="input" />
-              </div>
-            </div>
-          )}
-
-          {/* Specific days mode */}
-          {dateMode === 'specific' && (
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Add dates</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <input
-                  type="date"
-                  value={dateInput}
-                  onChange={e => setDateInput(e.target.value)}
-                  className="input"
-                  style={{ flex: 1 }}
-                />
-                <button
-                  onClick={() => {
-                    if (dateInput && !selectedDates.includes(dateInput)) {
-                      setSelectedDates(prev => [...prev, dateInput].sort())
-                      setDateInput("")
-                    }
-                  }}
-                  className="btn-primary"
-                  style={{ width: 'auto', padding: '12px 20px' }}
-                >
-                  Add
-                </button>
-              </div>
-              {selectedDates.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {selectedDates.sort().map(d => {
-                    const date = new Date(d + 'T00:00:00')
-                    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-                    const label = `${days[date.getDay()]} ${date.getDate()}/${date.getMonth()+1}`
-                    return (
-                      <div key={d} style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        padding: '8px 12px', background: 'var(--accent)',
-                        borderRadius: 'var(--radius-md)', fontWeight: 600, fontSize: 14,
-                        color: 'var(--accent-text)',
-                      }}>
-                        {label}
-                        <button
-                          onClick={() => setSelectedDates(prev => prev.filter(x => x !== d))}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--accent-text)', padding: 0, lineHeight: 1 }}
-                        >&times;</button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-              {selectedDates.length === 0 && (
-                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Pick the days you're considering.</p>
-              )}
-            </div>
-          )}
+          {/* Unified calendar picker (mode toggle + presets + calendar all in one) */}
+          <DatePicker
+            value={{ mode: dateMode, start: dateStart || undefined, end: dateEnd || undefined, dates: selectedDates }}
+            onChange={(v: DatePickerValue) => {
+              setDateMode(v.mode)
+              setDateStart(v.start || '')
+              setDateEnd(v.end || '')
+              setSelectedDates(v.dates || [])
+            }}
+          />
           <div>
             <label className="label" style={{ display: 'block', marginBottom: 8 }}>Location (optional)</label>
             <input
