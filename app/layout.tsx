@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
+import Script from 'next/script'
 import './globals.css'
 import { ToastHost } from '@/components/Toast'
 import { ConfirmHost } from '@/components/ui/ConfirmModal'
@@ -78,6 +79,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main style={{ minHeight: '100vh' }}>{children}</main>
         <ToastHost />
         <ConfirmHost />
+        {/* Google Identity Services — loaded once, used by GoogleCalendarSync. */}
+        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
       </body>
     </html>
   )
