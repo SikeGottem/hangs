@@ -5,6 +5,7 @@ import { getDb, ensureSchema } from '@/lib/db'
 import { requireAuth, requireCreator } from '@/lib/auth'
 import { ConfirmSchema, parseBody } from '@/lib/schemas'
 import { serverError, badRequest, unauthorized } from '@/lib/errors'
+import { notifyCrewMembers } from '@/lib/notifications'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -80,6 +81,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
               confirmed_activity = ?, updated_at = datetime('now') WHERE id = ?`,
         args: [body.date, body.hour, body.activityName || '', id],
       })
+      // Notify crew members if this is a crew hang
+      const crewRes = await db.execute({ sql: 'SELECT crew_id, name FROM hangs WHERE id = ?', args: [id] })
+      const crewId = crewRes.rows[0]?.crew_id as string | null
+      const hangName = (crewRes.rows[0]?.name as string) || 'a hang'
+      if (crewId) {
+        try {
+          await notifyCrewMembers(crewId, null, {
+            type: 'hang_confirmed',
+            text: `Plan confirmed: ${hangName}`,
+            url: `/h/${id}/results`,
+            hangId: id,
+          })
+        } catch (e) { console.warn('[hangs] confirm notify failed:', e) }
+      }
       return NextResponse.json({ success: true, status: 'confirmed', forced: true })
     }
 
@@ -115,6 +130,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
               confirmed_activity = ?, updated_at = datetime('now') WHERE id = ?`,
         args: [date, hour, activityName || '', id],
       })
+      // Notify crew if this is a crew hang
+      const crewRes = await db.execute({ sql: 'SELECT crew_id, name FROM hangs WHERE id = ?', args: [id] })
+      const crewId = crewRes.rows[0]?.crew_id as string | null
+      const hangName = (crewRes.rows[0]?.name as string) || 'a hang'
+      if (crewId) {
+        try {
+          await notifyCrewMembers(crewId, null, {
+            type: 'hang_confirmed',
+            text: `Plan confirmed: ${hangName}`,
+            url: `/h/${id}/results`,
+            hangId: id,
+          })
+        } catch (e) { console.warn('[hangs] confirm notify failed:', e) }
+      }
       return NextResponse.json({ success: true, status: 'confirmed', yesCount, threshold })
     }
 

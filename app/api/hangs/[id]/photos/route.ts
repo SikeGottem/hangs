@@ -47,9 +47,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const db = getDb()
     await ensureSchema()
+    // Stamp the crew_id so photos roll up into the crew album automatically.
+    const crewIdRow = await db.execute({ sql: 'SELECT crew_id FROM hangs WHERE id = ?', args: [id] })
+    const crewId = (crewIdRow.rows[0]?.crew_id as string | null) || null
     await db.execute({
-      sql: 'INSERT INTO photos (hang_id, participant_id, data, caption) VALUES (?, ?, ?, ?)',
-      args: [id, auth.sub, data, caption || null],
+      sql: 'INSERT INTO photos (hang_id, crew_id, participant_id, data, caption) VALUES (?, ?, ?, ?, ?)',
+      args: [id, crewId, auth.sub, data, caption || null],
     })
     return NextResponse.json({ success: true })
   } catch (e) {

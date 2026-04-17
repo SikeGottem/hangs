@@ -1,6 +1,10 @@
 // JWT sign/verify for participant and creator identity. Every mutation endpoint
 // must call verifyParticipantToken and use payload.sub as the authoritative
 // participantId — NEVER trust a participantId that comes from the request body.
+//
+// Two parallel identity systems:
+//   1. Participant JWT (below) — per-hang, 90d, localStorage. Legacy guest flow.
+//   2. User session JWT (further below) — per-user, 30d, HTTP-only cookie. Crew flow.
 
 import { SignJWT, jwtVerify } from 'jose'
 
@@ -11,6 +15,18 @@ if (!rawSecret && process.env.NODE_ENV === 'production') {
 const secret = new TextEncoder().encode(
   rawSecret || 'dev-only-insecure-secret-change-me-in-production'
 )
+
+// Separate secret for user sessions so a participant token can't be swapped
+// for a session token and vice versa.
+const rawUserSecret = process.env.USER_SECRET
+if (!rawUserSecret && process.env.NODE_ENV === 'production') {
+  console.error('[hangs] USER_SECRET is not set — user sessions will be insecure')
+}
+const userSecret = new TextEncoder().encode(
+  rawUserSecret || 'dev-only-insecure-user-secret-change-me-in-production'
+)
+
+export const SESSION_COOKIE = 'hangs_session'
 
 export type ParticipantClaims = {
   sub: string       // participantId
@@ -74,4 +90,75 @@ export async function requireCreator(
   const claims = await requireAuth(req, hangId, body)
   if (!claims || claims.role !== 'creator') return null
   return claims
+}
+
+// ── User session (crew pivot) ───────────────────────────────────────────────
+//
+// Issued after magic-link verification. Stored in HTTP-only cookie `hangs_session`.
+// Survives device changes and is the source of truth for "am I logged in".
+
+export type UserClaims = {
+  sub: string       // userId
+  email: string
+}
+
+export async function signUserToken(userId: string, email: string): Promise<string> {
+  return new SignJWT({ email })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(userId)
+    .setIssuedAt()
+    .setExpirationTime('30d')
+    .sign(userSecret)
+}
+
+export async function verifyUserToken(token: string): Promise<UserClaims | null> {
+  if (!token) return null
+  try {
+    const { payload } = await jwtVerify(token, userSecret)
+    if (!payload.sub || typeof payload.email !== 'string') return null
+    return { sub: payload.sub, email: payload.email }
+  } catch {
+    return null
+  }
+}
+
+// Reads the session cookie from the request. Next's Request has cookies on the
+// NextRequest variant, but we stay framework-agnostic by parsing the header.
+export function getSessionTokenFromRequest(req: Request): string {
+  const cookieHeader = req.headers.get('cookie') || ''
+  for (const part of cookieHeader.split(';')) {
+    const [k, ...rest] = part.trim().split('=')
+    if (k === SESSION_COOKIE) return decodeURIComponent(rest.join('='))
+  }
+  return ''
+}
+
+export async function requireUser(req: Request): Promise<UserClaims | null> {
+  return verifyUserToken(getSessionTokenFromRequest(req))
+}
+
+// Build a Set-Cookie header value. HTTP-only, SameSite=Lax so it's sent on
+// top-level navigations from magic-link emails. Secure only in production.
+export function buildSessionCookie(token: string, maxAgeSec = 60 * 60 * 24 * 30): string {
+  const parts = [
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${maxAgeSec}`,
+  ]
+  if (process.env.NODE_ENV === 'production') parts.push('Secure')
+  return parts.join('; ')
+}
+
+export function buildClearSessionCookie(): string {
+  const parts = [
+    `${SESSION_COOKIE}=`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=0',
+  ]
+  if (process.env.NODE_ENV === 'production') parts.push('Secure')
+  return parts.join('; ')
 }

@@ -1,9 +1,11 @@
 // POST /api/hangs — create a new hang, return creator token
 import { NextResponse } from 'next/server'
 import { getDb, ensureSchema, genId } from '@/lib/db'
-import { signParticipantToken } from '@/lib/auth'
+import { signParticipantToken, requireUser } from '@/lib/auth'
 import { CreateHangSchema, parseBody } from '@/lib/schemas'
-import { serverError, badRequest } from '@/lib/errors'
+import { serverError, badRequest, forbidden } from '@/lib/errors'
+import { notifyCrewMembers } from '@/lib/notifications'
+import { logEvent } from '@/lib/analytics'
 
 export async function POST(req: Request) {
   try {
@@ -11,6 +13,24 @@ export async function POST(req: Request) {
     const parsed = parseBody(raw, CreateHangSchema)
     if ('error' in parsed) return badRequest(parsed.error)
     const body = parsed.data
+
+    // Crew-scoped hang: verify the caller is a logged-in member of that crew.
+    // Falls through to guest flow (user=null, crew_id=null) when crewId absent.
+    let userClaims = null
+    let crewMemberDisplay: string | null = null
+    if (body.crewId) {
+      userClaims = await requireUser(req)
+      if (!userClaims) return forbidden('Sign in to create a crew hang')
+      const db0 = getDb()
+      await ensureSchema()
+      const memberRes = await db0.execute({
+        sql: `SELECT display_name FROM crew_members
+              WHERE crew_id = ? AND user_id = ?`,
+        args: [body.crewId, userClaims.sub],
+      })
+      if (!memberRes.rows[0]) return forbidden('Not a member of this crew')
+      crewMemberDisplay = memberRes.rows[0].display_name as string | null
+    }
 
     // Date-mode cross-field validation (zod can't express this cleanly)
     if (body.dateMode === 'specific') {
@@ -41,17 +61,22 @@ export async function POST(req: Request) {
     // One batched write: hang row + creator participant row + activity rows + bring-list seeds.
     const bringListSeed = body.bringListSeed || []
 
+    // If the creator is a logged-in crew member, prefer their crew display name
+    // over the body-supplied creatorName (avoids name drift within a crew).
+    const creatorName = crewMemberDisplay || body.creatorName
+
     await db.batch(
       [
         {
           sql: `INSERT INTO hangs (id, name, creator_name, creator_id, date_range_start, date_range_end,
                   date_mode, selected_dates, template, location, duration,
-                  description, theme, dress_code, response_deadline, ask_dietary, custom_question)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  description, theme, dress_code, response_deadline, ask_dietary, custom_question,
+                  crew_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             hangId,
             body.name,
-            body.creatorName,
+            creatorName,
             creatorId,
             start,
             end,
@@ -66,11 +91,12 @@ export async function POST(req: Request) {
             body.responseDeadline || null,
             body.askDietary ? 1 : 0,
             body.customQuestion || null,
+            body.crewId || null,
           ],
         },
         {
-          sql: 'INSERT INTO participants (id, hang_id, name) VALUES (?, ?, ?)',
-          args: [creatorId, hangId, body.creatorName],
+          sql: 'INSERT INTO participants (id, hang_id, name, user_id) VALUES (?, ?, ?, ?)',
+          args: [creatorId, hangId, creatorName, userClaims?.sub || null],
         },
         ...activities.map(a => ({
           sql: 'INSERT INTO activities (hang_id, name, added_by, cost_estimate) VALUES (?, ?, ?, ?)',
@@ -85,6 +111,27 @@ export async function POST(req: Request) {
     )
 
     const creatorToken = await signParticipantToken(creatorId, hangId, true)
+
+    // Fan-out notifications to crew members if this is a crew hang
+    if (body.crewId) {
+      try {
+        await notifyCrewMembers(body.crewId, userClaims?.sub || null, {
+          type: 'hang_created',
+          text: `New hang: ${body.name}`,
+          url: `/h/${hangId}`,
+          hangId,
+        })
+      } catch (e) {
+        console.warn('[hangs] notification fanout failed:', e)
+      }
+    }
+
+    logEvent('hang_created', {
+      userId: userClaims?.sub || null,
+      crewId: body.crewId || null,
+      hangId,
+      metadata: { hasCrew: !!body.crewId },
+    })
 
     return NextResponse.json({
       id: hangId,

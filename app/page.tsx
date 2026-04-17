@@ -169,6 +169,11 @@ const fadeUp = {
 
 export default function Home() {
   const [myHangs, setMyHangs] = useState<any[]>([])
+  const [me, setMe] = useState<{ user: any; crews: any[] } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/me').then(r => r.json()).then(setMe).catch(() => setMe({ user: null, crews: [] }))
+  }, [])
 
   useEffect(() => {
     // Find hang IDs from localStorage — only show hangs the user is part of.
@@ -272,10 +277,26 @@ export default function Home() {
           One link. Everyone fills in when they're free, votes on what to do. You get a plan.
         </motion.p>
 
-        <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp}>
-          <Link href="/create" className="btn-primary" style={{ padding: '16px 40px', fontSize: 17, maxWidth: 300 }}>
-            Create a Hang
-          </Link>
+        <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          {me?.user ? (
+            <>
+              <Link href="/crews" className="btn-primary" style={{ padding: '16px 40px', fontSize: 17, maxWidth: 300 }}>
+                Your crews ({me.crews.length})
+              </Link>
+              <Link href="/create" style={{ fontSize: 14, color: 'var(--text-muted)', textDecoration: 'none' }}>
+                or plan a quick hang →
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link href="/create" className="btn-primary" style={{ padding: '16px 40px', fontSize: 17, maxWidth: 300 }}>
+                Plan a quick hang
+              </Link>
+              <Link href="/login" style={{ fontSize: 14, color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+                → Save your crew (recurring groups)
+              </Link>
+            </>
+          )}
         </motion.div>
       </div>
 

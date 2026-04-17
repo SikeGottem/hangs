@@ -67,9 +67,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const db = getDb()
     await ensureSchema()
+    // Stamp crew_id so crew-level running balance rolls up this expense.
+    const crewIdRow = await db.execute({ sql: 'SELECT crew_id FROM hangs WHERE id = ?', args: [id] })
+    const crewId = (crewIdRow.rows[0]?.crew_id as string | null) || null
     await db.execute({
-      sql: 'INSERT INTO expenses (hang_id, description, amount, paid_by, split_between) VALUES (?, ?, ?, ?, ?)',
-      args: [id, description, amount, auth.sub, splitBetween ? JSON.stringify(splitBetween) : null],
+      sql: 'INSERT INTO expenses (hang_id, crew_id, description, amount, paid_by, split_between) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [id, crewId, description, amount, auth.sub, splitBetween ? JSON.stringify(splitBetween) : null],
     })
     return NextResponse.json({ success: true })
   } catch (e) {

@@ -150,6 +150,12 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     }
   }, [])
 
+  // Crew prefill banner state — non-null when a logged-in crew member was
+  // auto-joined with data pulled from their crew profile.
+  const [crewPrefill, setCrewPrefill] = useState<{ name: string; dietary: string | null } | null>(null)
+  // Crew member's saved weekly availability shape — used by "Use my usual" button
+  const [crewShape, setCrewShape] = useState<Record<string, string> | null>(null)
+
   useEffect(() => {
     fetch(`/api/hangs/${id}`).then(r => r.json()).then(d => { setHang(d); setLoading(false) })
     fetch(`/api/hangs/${id}/bring-list`)
@@ -172,6 +178,56 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     const existing = localStorage.getItem(`hangs_participant_${id}`)
     if (existing) { router.replace(`/h/${id}/results`) }
   }, [id, editPid])
+
+  // Crew-member auto-join: when a logged-in user opens a hang for a crew they
+  // belong to, skip the name/dietary/custom-question steps entirely and jump
+  // straight into availability. Server validates membership and pulls the
+  // display_name + dietary from their crew profile. This is the key
+  // "respond in <15 seconds" feature for returning crew members.
+  useEffect(() => {
+    if (!hang?.hang) return
+    const crewId = hang.hang.crew_id
+    if (!crewId) return
+    // Skip if we already have a participantId (either edit mode or returning responder)
+    if (participantId || editPid) return
+    const existing = typeof window !== 'undefined' ? localStorage.getItem(`hangs_participant_${id}`) : null
+    if (existing) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const meRes = await fetch('/api/me')
+        if (cancelled) return
+        const me = await meRes.json()
+        if (!me?.user) return
+        // Attempt crew-member auto-join (no body name — server uses crew profile)
+        const joinRes = await fetch(`/api/hangs/${id}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        if (!joinRes.ok) return
+        const data = await joinRes.json()
+        if (cancelled) return
+        if (!data.prefilled) return
+        setPid(data.participantId)
+        setFriendName(data.name)
+        if (data.dietary) setDietary(data.dietary)
+        localStorage.setItem(`hangs_participant_${id}`, data.participantId)
+        if (data.token) localStorage.setItem(`hangs_token_${id}`, data.token)
+        if (data.name) localStorage.setItem('hangs_last_name', data.name)
+        setCrewPrefill({ name: data.name, dietary: data.dietary || null })
+        if (data.availabilityShape && typeof data.availabilityShape === 'object') {
+          setCrewShape(data.availabilityShape)
+        }
+        // Jump past the name step
+        setStep(1)
+      } catch (e) {
+        console.warn('[hangs] crew auto-join skipped:', e)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [hang, id, participantId, editPid])
 
   const join = async () => {
     const res = await fetch(`/api/hangs/${id}/join`, {
@@ -272,6 +328,30 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     try { setHasLastShape(!!localStorage.getItem('hangs_last_availability_shape')) } catch { /* ignore */ }
   }, [])
 
+  // Apply the logged-in crew member's saved availability_shape (from their
+  // crew_members row) to the current hang's dates. Overrides whatever's on
+  // the grid so "Use my usual" is always a clean rehydrate.
+  const applyCrewShape = () => {
+    if (!hang || !crewShape) return
+    const isSpecific = hang.hang.date_mode === 'specific'
+    const dateList = isSpecific
+      ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
+      : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const newSlots: Record<string, string> = {}
+    for (const d of dateList) {
+      const dayName = dayNames[new Date(d + 'T00:00:00').getDay()]
+      for (const h of HOURS) {
+        const status = crewShape[`${dayName}|${h}`]
+        if (status && status !== 'busy') newSlots[`${d}|${h}`] = status
+      }
+    }
+    setSlots(newSlots)
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([8, 30, 8]) } catch { /* ignore */ }
+    }
+  }
+
   const submitAvailability = async () => {
     const slotArray = Object.entries(slots).map(([key, status]) => {
       const [date, hour] = key.split("|")
@@ -320,8 +400,10 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
         body: JSON.stringify({ votes: voteList }),
       })
     }
-    // Advance to the next applicable step: dietary → custom question → commitment
-    if (hang?.hang?.ask_dietary) setStep(3)
+    // Advance to the next applicable step: dietary → custom question → commitment.
+    // Crew members with dietary already on their profile skip step 3.
+    const skipDietary = !!crewPrefill?.dietary
+    if (hang?.hang?.ask_dietary && !skipDietary) setStep(3)
     else if (hang?.hang?.custom_question) setStep(4)
     else setStep(5)
   }
@@ -391,6 +473,59 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px' }}>
+      {/* Crew hero band — shown whenever the hang belongs to a crew.
+          Signals "this is Climbing Soc, not a random link". */}
+      {hang?.crew && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 14px', marginBottom: 12,
+            background: hang.crew.coverColor || 'var(--maybe-light)',
+            borderRadius: 10,
+            color: '#1A1A1A',
+          }}
+        >
+          <div style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: 'rgba(255,255,255,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18,
+          }}>
+            {hang.crew.coverEmoji || '·'}
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em', opacity: 0.7 }}>
+              From the crew
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{hang.crew.name}</div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Crew prefill banner — shown when we auto-joined via crew membership */}
+      {crewPrefill && step < 5 && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 14px', marginBottom: 16,
+            background: 'var(--maybe-light)', border: '1px solid #F5C842', borderRadius: 10,
+            fontSize: 13,
+          }}
+        >
+          <span style={{ fontSize: 16 }}>👋</span>
+          <div>
+            <div style={{ fontWeight: 700 }}>Welcome back, {crewPrefill.name}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Name{crewPrefill.dietary ? ' + dietary' : ''} pulled from your crew profile.
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* First-visit onboarding — only on step 0, auto-hides after dismiss. */}
       {step === 0 && !editPid && <OnboardingHero />}
 
@@ -604,7 +739,23 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
 
           {/* Quick-fill presets — 80% of responders never touch the grid */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {hasLastShape && (
+            {crewShape && Object.keys(crewShape).length > 0 && (
+              <button
+                onClick={applyCrewShape}
+                aria-label="Use my crew availability shape"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '10px 14px', fontSize: 13, fontWeight: 700,
+                  background: 'var(--accent)', color: 'var(--accent-text)',
+                  border: '1px solid var(--accent)', borderRadius: 'var(--radius-md)',
+                  cursor: 'pointer', fontFamily: 'var(--font-display)',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                ★ Use my usual
+              </button>
+            )}
+            {!crewShape && hasLastShape && (
               <button
                 onClick={applyLastHangShape}
                 aria-label="Use same availability as my last hang"

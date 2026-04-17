@@ -807,6 +807,45 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
+      {/* Guest → crew conversion CTA. Shown when the hang belongs to a crew
+          with a public invite link — gives responders a frictionless path to
+          "save this crew for next time" after their first hang. */}
+      {data.crew && data.crew.publicInviteToken && data.crew.slug && (
+        <GuestCrewConvertCTA
+          crewName={data.crew.name}
+          crewEmoji={data.crew.coverEmoji}
+          joinHref={`/c/${data.crew.slug}/join?token=${data.crew.publicInviteToken}`}
+        />
+      )}
+
+      {/* Post-hang recap sharing (only after confirmed_date passed) */}
+      {isPast && hang.status === 'confirmed' && (
+        <div style={{
+          padding: '12px 14px', marginBottom: 20,
+          background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>This hang wrapped — share the recap</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              Downloads a story-sized image (1080×1920)
+            </div>
+          </div>
+          <a
+            href={`/api/hangs/${id}/recap`}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={`hangs-${id}-recap.png`}
+            style={{
+              fontSize: 12, fontWeight: 700, padding: '8px 14px', borderRadius: 8,
+              background: 'var(--accent)', color: 'var(--accent-text)', textDecoration: 'none', whiteSpace: 'nowrap',
+            }}
+          >
+            ↓ Share recap
+          </a>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         {isCreator && editingField === 'name' ? (
@@ -928,21 +967,21 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             </div>
           )}
 
-          {/* Weather */}
+          {/* Weather — compact inline badge (rain warning inlined as color) */}
           {weather && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, padding: '10px 14px', background: 'var(--surface-dim)', borderRadius: 'var(--radius-sm)' }}>
-              <span style={{ fontSize: 20 }}>{weatherIcon(weather.weatherCode)}</span>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{weather.description} / {weather.tempMin}&deg;-{weather.tempMax}&deg;C</div>
-                {weather.precipChance > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{weather.precipChance}% chance of rain</div>}
-              </div>
-            </div>
-          )}
-
-          {/* Rain warning for outdoor activities */}
-          {rainWarning && (
-            <div style={{ marginTop: 8, padding: '8px 12px', background: '#FEF2F2', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--error)', fontWeight: 500 }}>
-              Heads up: rain expected. Some outdoor activities might not work.
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              marginTop: 10, padding: '4px 10px',
+              background: rainWarning ? '#FEF2F2' : 'var(--surface-dim)',
+              borderRadius: 999,
+              fontSize: 12, color: rainWarning ? 'var(--error)' : 'var(--text-secondary)',
+              fontWeight: 500,
+            }}
+            title={rainWarning ? `Rain expected — ${weather.precipChance}% chance` : `${weather.tempMin}°-${weather.tempMax}°C`}
+            >
+              <span>{weatherIcon(weather.weatherCode)}</span>
+              <span>{weather.tempMin}°-{weather.tempMax}°C</span>
+              {weather.precipChance > 20 && <span>· {weather.precipChance}% rain</span>}
             </div>
           )}
 
@@ -2021,6 +2060,69 @@ function Confetti() {
           100% { transform: translateY(100vh) rotate(${360 + Math.random() * 360}deg); opacity: 0; }
         }
       `}</style>
+    </div>
+  )
+}
+
+// Dismissible CTA shown to responders on crew hangs with a public invite link.
+// "Liked this crew? Save it and your next response is 10 seconds."
+// Uses localStorage to not re-show once dismissed for this crew.
+function GuestCrewConvertCTA({ crewName, crewEmoji, joinHref }: {
+  crewName: string
+  crewEmoji: string | null
+  joinHref: string
+}) {
+  const [hidden, setHidden] = useState(true)
+  const [crewSlug] = useState(() => {
+    try { return joinHref.split('/c/')[1]?.split('/')[0] || '' } catch { return '' }
+  })
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem(`hangs_crew_cta_dismissed_${crewSlug}`)
+      if (!dismissed) setHidden(false)
+    } catch { setHidden(false) }
+  }, [crewSlug])
+  const dismiss = () => {
+    try { localStorage.setItem(`hangs_crew_cta_dismissed_${crewSlug}`, '1') } catch { /* ignore */ }
+    setHidden(true)
+  }
+  if (hidden) return null
+  return (
+    <div style={{
+      padding: '14px 16px', marginBottom: 16,
+      background: 'var(--surface)', border: '1.5px solid var(--accent)', borderRadius: 12,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+        {crewEmoji && <div style={{ fontSize: 22 }}>{crewEmoji}</div>}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Liked planning with {crewName}?</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            Join the crew — next time is 10 seconds.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <a
+          href={joinHref}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: '8px 12px', borderRadius: 6,
+            background: 'var(--accent)', color: 'var(--accent-text)', textDecoration: 'none', whiteSpace: 'nowrap',
+          }}
+        >
+          Join →
+        </a>
+        <button
+          onClick={dismiss}
+          aria-label="Dismiss"
+          style={{
+            fontSize: 18, padding: '4px 8px', background: 'none', border: 'none',
+            color: 'var(--text-muted)', cursor: 'pointer',
+          }}
+        >
+          ×
+        </button>
+      </div>
     </div>
   )
 }

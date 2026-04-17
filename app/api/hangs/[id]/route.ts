@@ -64,7 +64,36 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       })),
     )
 
-    return NextResponse.json({ hang, participants, activities, availability, synthesis })
+    // Crew branding (for responder hero + share cards). Only fetched when the
+    // hang is crew-scoped — guest hangs have no crew context.
+    let crew: {
+      id: string
+      name: string
+      slug: string | null
+      coverColor: string | null
+      coverEmoji: string | null
+      publicInviteToken: string | null
+    } | null = null
+    const crewId = (hang as any).crew_id as string | null
+    if (crewId) {
+      const crewRes = await db.execute({
+        sql: 'SELECT id, name, slug, cover_color, cover_emoji, public_invite_token FROM crews WHERE id = ?',
+        args: [crewId],
+      })
+      const row = crewRes.rows[0]
+      if (row) {
+        crew = {
+          id: row.id as string,
+          name: row.name as string,
+          slug: (row.slug as string) || null,
+          coverColor: (row.cover_color as string) || null,
+          coverEmoji: (row.cover_emoji as string) || null,
+          publicInviteToken: (row.public_invite_token as string) || null,
+        }
+      }
+    }
+
+    return NextResponse.json({ hang, participants, activities, availability, synthesis, crew })
   } catch (e) {
     return serverError(e, 'GET /api/hangs/[id]')
   }

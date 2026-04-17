@@ -74,9 +74,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await ensureSchema()
 
     if (body.action === 'create') {
+      // Stamp crew_id so polls roll up into crew view.
+      const crewIdRow = await db.execute({ sql: 'SELECT crew_id FROM hangs WHERE id = ?', args: [id] })
+      const crewId = (crewIdRow.rows[0]?.crew_id as string | null) || null
       const res = await db.execute({
-        sql: 'INSERT INTO polls (hang_id, question, created_by) VALUES (?, ?, ?)',
-        args: [id, body.question, auth.sub],
+        sql: 'INSERT INTO polls (hang_id, crew_id, question, created_by) VALUES (?, ?, ?, ?)',
+        args: [id, crewId, body.question, auth.sub],
       })
       const pollId = Number(res.lastInsertRowid)
       await db.batch(

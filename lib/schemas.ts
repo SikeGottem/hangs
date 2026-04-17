@@ -54,11 +54,16 @@ export const CreateHangSchema = z.object({
   askDietary: z.boolean().optional(),
   customQuestion: OptionalShortText(200),
   bringListSeed: z.array(ShortText(100)).max(20).optional(),
+  // Crew-scoped hang: when set, creator must be a member of this crew and
+  // hangs.crew_id is populated so crew views can roll this hang up.
+  crewId: z.string().min(4).max(32).optional(),
 })
 
 // ── POST /api/hangs/[id]/join ──
+// Name is optional when the caller is a logged-in crew member — the server
+// pulls display_name + dietary from their crew profile in that case.
 export const JoinSchema = z.object({
-  name: ShortText(50),
+  name: ShortText(50).optional(),
 })
 
 // ── POST /api/hangs/[id]/availability ──
@@ -222,6 +227,77 @@ export const ConfirmSchema = z.union([
 export const ParticipantDeleteSchema = z.object({
   targetParticipantId: ParticipantId.optional(), // optional = self-delete
 })
+
+// ── Crew pivot schemas ──
+
+const Email = z.string().trim().toLowerCase().email('Invalid email').max(200)
+
+// POST /api/auth/request-magic-link
+export const RequestMagicLinkSchema = z.object({
+  email: Email,
+  // Optional redirect after verification (must be a relative path to prevent open-redirect)
+  redirect: z
+    .string()
+    .max(300)
+    .regex(/^\/[^/]/, 'Must be a relative path')
+    .optional(),
+})
+
+// POST /api/crews
+export const CreateCrewSchema = z.object({
+  name: ShortText(80),
+  description: OptionalShortText(400),
+  inviteEmails: z.array(Email).max(50).optional(),
+})
+
+// PATCH /api/crews/[id]
+export const UpdateCrewSchema = z
+  .object({
+    name: ShortText(80).optional(),
+    description: OptionalShortText(400),
+    slug: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[a-z0-9-]{2,40}$/, 'Slug must be 2-40 chars: lowercase letters, numbers, hyphens')
+      .optional(),
+    // Recurring rule: "weekly:dow:hour" or "biweekly:dow:hour". Empty string clears.
+    // dow = mon|tue|wed|thu|fri|sat|sun, hour = 0-23
+    recurringRule: z
+      .string()
+      .regex(/^(?:|(?:weekly|biweekly):(?:mon|tue|wed|thu|fri|sat|sun):(?:[0-9]|1[0-9]|2[0-3]))$/, 'Invalid recurring rule')
+      .optional(),
+    recurringTemplateHangId: z.string().min(4).max(32).optional(),
+    coverColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Color must be #RRGGBB').optional().or(z.literal('')),
+    coverEmoji: z.string().max(8).optional().or(z.literal('')),
+  })
+  .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
+
+// POST /api/crews/[id]/members
+export const InviteMembersSchema = z.object({
+  emails: z.array(Email).min(1).max(50),
+})
+
+// PATCH /api/crews/[id]/members/[userId]
+export const UpdateMemberProfileSchema = z
+  .object({
+    displayName: ShortText(60).optional(),
+    dietary: OptionalShortText(60),
+    transportPreference: z
+      .enum(['own_way', 'driving', 'need_ride', 'passenger', 'none'])
+      .optional(),
+    contactPhone: OptionalShortText(40),
+    notes: OptionalShortText(400),
+    role: z.enum(['exec', 'member']).optional(),
+    // Availability shape: weekday+hour → status. Bounded to prevent abuse.
+    availabilityShape: z
+      .record(z.string().regex(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\|\d{1,2}$/), z.enum(['free', 'maybe', 'busy']))
+      .optional(),
+  })
+  .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
+
+// POST /api/crews/[id]/hangs — same as CreateHangSchema but scoped to crew
+// (crew context is inferred from the path, not the body, so schema is reused)
 
 // Helper: run a schema.safeParse and return either the data or a 400 NextResponse.
 export function parseBody<T extends z.ZodTypeAny>(

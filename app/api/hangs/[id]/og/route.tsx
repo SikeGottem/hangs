@@ -49,6 +49,24 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const participantCount = (pRes.rows[0]?.cnt as number) || 0
   const activities = actRes.rows.map(r => r.name as string).filter(Boolean)
 
+  // Crew branding — when the hang belongs to a saved crew, pull its color + emoji
+  // so the OG card feels native to that group.
+  let crewBrand: { name: string; color: string; emoji: string } | null = null
+  if (hang?.crew_id) {
+    const crewRes = await db.execute({
+      sql: 'SELECT name, cover_color, cover_emoji FROM crews WHERE id = ?',
+      args: [hang.crew_id as string],
+    })
+    const row = crewRes.rows[0]
+    if (row) {
+      crewBrand = {
+        name: row.name as string,
+        color: (row.cover_color as string) || ACCENT,
+        emoji: (row.cover_emoji as string) || '',
+      }
+    }
+  }
+
   if (!hang) {
     return new ImageResponse(
       (
@@ -103,12 +121,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         fontFamily: 'sans-serif',
         position: 'relative',
       }}>
-        {/* Accent stripe top-left */}
+        {/* Accent stripe top-left — uses crew color when branded */}
         <div style={{
           position: 'absolute',
           top: 0, left: 0,
           width: 16, height: '100%',
-          background: ACCENT,
+          background: crewBrand?.color || ACCENT,
         }} />
 
         {/* Subtle border paper feel */}
@@ -134,7 +152,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             color: TEXT_PRIMARY,
             letterSpacing: '-0.04em',
           }}>
-            hangs
+            {crewBrand
+              ? `${crewBrand.emoji ? crewBrand.emoji + ' ' : ''}${crewBrand.name}`
+              : 'hangs'}
           </div>
           <div style={{
             display: 'flex',

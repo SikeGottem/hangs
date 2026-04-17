@@ -206,6 +206,73 @@ async function _bootstrap() {
       FOREIGN KEY (hang_id) REFERENCES hangs(id),
       FOREIGN KEY (participant_id) REFERENCES participants(id)
     )`,
+    // ── Crew pivot: persistent accounts + saved groups ──
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      google_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS auth_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT,
+      email TEXT,
+      purpose TEXT NOT NULL,
+      crew_context TEXT,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS crews (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      slug TEXT UNIQUE,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS crew_members (
+      id TEXT PRIMARY KEY,
+      crew_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      display_name TEXT,
+      role TEXT DEFAULT 'member',
+      dietary TEXT,
+      transport_preference TEXT,
+      contact_phone TEXT,
+      notes TEXT,
+      joined_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(crew_id, user_id),
+      FOREIGN KEY (crew_id) REFERENCES crews(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      crew_id TEXT,
+      hang_id TEXT,
+      type TEXT NOT NULL,
+      text TEXT NOT NULL,
+      url TEXT,
+      read_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS analytics_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      crew_id TEXT,
+      hang_id TEXT,
+      event TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
   ]
 
   // One batched write transaction — 1 network round-trip instead of ~20 sequential.
@@ -232,6 +299,26 @@ async function _bootstrap() {
     ['bring_list', 'parent_id', 'INTEGER'],
     ['participants', 'dietary', 'TEXT'],
     ['participants', 'custom_answer', 'TEXT'],
+    // Crew pivot — additive columns for crew-scoped hangs and features
+    ['hangs', 'crew_id', 'TEXT'],
+    ['hangs', 'recurrence', 'TEXT'],
+    ['hangs', 'parent_hang_id', 'TEXT'],
+    ['participants', 'user_id', 'TEXT'],
+    ['photos', 'crew_id', 'TEXT'],
+    ['expenses', 'crew_id', 'TEXT'],
+    ['polls', 'crew_id', 'TEXT'],
+    // Crew member availability shape — a persistent weekly pattern so members
+    // don't repaint their grid every hang. JSON: { "Mon|19": "free", ... }
+    ['crew_members', 'availability_shape', 'TEXT'],
+    // Recurring hang scheduling. rule is a simple format like "weekly:thu:19"
+    // or "biweekly:fri:18". template_hang_id points at the hang to clone.
+    ['crews', 'recurring_rule', 'TEXT'],
+    ['crews', 'recurring_template_hang_id', 'TEXT'],
+    ['crews', 'cover_color', 'TEXT'],
+    ['crews', 'cover_emoji', 'TEXT'],
+    // Public invite link token. When non-null, anyone with the URL can join.
+    // Rotating this value instantly revokes any previously-shared links.
+    ['crews', 'public_invite_token', 'TEXT'],
   ]
   await Promise.allSettled(
     migrations.map(([t, c, ty]) => db.execute(`ALTER TABLE ${t} ADD COLUMN ${c} ${ty}`))

@@ -68,10 +68,33 @@ type Activity = { name: string; costEstimate: string }
 
 export default function CreatePage() {
   const router = useRouter()
+  // Crew context: when ?crewId=... is in the URL, the hang is being planned
+  // for a specific saved crew. We fetch the creator's crew display_name so the
+  // name field pre-fills, and we pass crewId to POST /api/hangs.
+  const [crewCtx, setCrewCtx] = useState<{ id: string; name: string } | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const sp = new URLSearchParams(window.location.search)
+    const cid = sp.get('crewId')
+    const cname = sp.get('crewName')
+    if (cid) setCrewCtx({ id: cid, name: cname || 'Crew' })
+  }, [])
+
   const [step, setStep] = useState(0) // 0=template, 1=basics, 2=activities, 3=extras, 4=review, 5=done
   const [template, setTemplate] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [creatorName, setCreatorName] = useState("")
+
+  // Pre-fill creator name from crew membership when planning for a crew.
+  useEffect(() => {
+    if (!crewCtx) return
+    fetch(`/api/crews/${crewCtx.id}/state`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.myProfile?.displayName) setCreatorName(d.myProfile.displayName)
+      })
+      .catch(() => {})
+  }, [crewCtx])
   const [dateMode, setDateMode] = useState<'range' | 'specific'>('range')
   // Default the date range to "today → end of weekend" so users don't start
   // from blank. If it's already Sunday evening, default to "next Fri → Sun".
@@ -182,6 +205,7 @@ export default function CreatePage() {
           askDietary: askDietary || undefined,
           customQuestion: customQuestion || undefined,
           bringListSeed: bringListSeed.length > 0 ? bringListSeed : undefined,
+          crewId: crewCtx?.id,
         }),
       })
       if (!res.ok) throw new Error(`Create failed: ${res.status}`)
@@ -235,6 +259,29 @@ export default function CreatePage() {
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '16px 24px 48px' }}>
+      {/* Crew context banner — shown when planning for a specific saved crew */}
+      {crewCtx && step < 5 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 14px',
+          marginBottom: 20,
+          background: 'var(--maybe-light)',
+          border: '1px solid #F5C842',
+          borderRadius: 10,
+          fontSize: 13,
+        }}>
+          <div>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>For crew</span>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{crewCtx.name}</div>
+          </div>
+          <a href={`/crews/${crewCtx.id}`} style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+            Back
+          </a>
+        </div>
+      )}
+
       {/* Progress */}
       {step < 5 && (
         <div className="progress-bar" style={{ marginBottom: 32 }}>
