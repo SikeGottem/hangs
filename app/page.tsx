@@ -263,7 +263,7 @@ export default function Home() {
             color: 'var(--text-primary)',
             marginBottom: 16,
           }}>
-            Plan your next<br /><span style={{ color: 'var(--accent)' }}>hangout</span>
+            Plan with your crew,<br /><span style={{ color: 'var(--accent)' }}>every week.</span>
           </h1>
         </motion.div>
 
@@ -271,29 +271,55 @@ export default function Home() {
           fontSize: 17,
           color: 'var(--text-secondary)',
           lineHeight: 1.55,
-          maxWidth: 340,
+          maxWidth: 360,
           marginBottom: 32,
         }}>
-          One link. Everyone fills in when they're free, votes on what to do. You get a plan.
+          Dinner club, society, study group. Save your crew once — every future hang takes 10 seconds.
         </motion.p>
 
-        <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+        <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%', maxWidth: 320 }}>
           {me?.user ? (
             <>
-              <Link href="/crews" className="btn-primary" style={{ padding: '16px 40px', fontSize: 17, maxWidth: 300 }}>
-                Your crews ({me.crews.length})
+              <Link
+                href={me.crews.length > 0 ? '/crews' : '/crews/new'}
+                className="btn-primary"
+                style={{ padding: '16px 24px', fontSize: 16, width: '100%', textAlign: 'center' }}
+              >
+                {me.crews.length > 0 ? `Your crews (${me.crews.length})` : 'Start a crew'}
               </Link>
-              <Link href="/create" style={{ fontSize: 14, color: 'var(--text-muted)', textDecoration: 'none' }}>
-                or plan a quick hang →
+              <Link
+                href="/create"
+                style={{
+                  padding: '14px 24px', fontSize: 15, width: '100%', textAlign: 'center',
+                  border: '1.5px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)', textDecoration: 'none', fontWeight: 600,
+                  background: 'var(--surface)',
+                  boxSizing: 'border-box',
+                }}
+              >
+                Plan a one-off →
               </Link>
             </>
           ) : (
             <>
-              <Link href="/create" className="btn-primary" style={{ padding: '16px 40px', fontSize: 17, maxWidth: 300 }}>
-                Plan a quick hang
+              <Link
+                href="/login"
+                className="btn-primary"
+                style={{ padding: '16px 24px', fontSize: 16, width: '100%', textAlign: 'center' }}
+              >
+                Start a crew
               </Link>
-              <Link href="/login" style={{ fontSize: 14, color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
-                → Save your crew (recurring groups)
+              <Link
+                href="/create"
+                style={{
+                  padding: '14px 24px', fontSize: 15, width: '100%', textAlign: 'center',
+                  border: '1.5px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)', textDecoration: 'none', fontWeight: 600,
+                  background: 'var(--surface)',
+                  boxSizing: 'border-box',
+                }}
+              >
+                Plan a one-off →
               </Link>
             </>
           )}
@@ -350,39 +376,58 @@ export default function Home() {
         </div>
       </motion.div>
 
-      {/* ── Three-step strip ── */}
+      {/* ── How crews work — the compounding story ── */}
       <div style={{
         padding: '40px 24px',
         background: 'var(--surface)',
         borderTop: '1px solid var(--border-light)',
         borderBottom: '1px solid var(--border-light)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 24, maxWidth: 520, margin: '0 auto' }}>
-          {[
-            { n: '1', title: 'Create', desc: 'Pick dates + activities' },
-            { n: '2', title: 'Share', desc: 'One link to your group' },
-            { n: '3', title: 'Done', desc: 'Smart plan in seconds' },
-          ].map((s, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: '-40px' }}
-              transition={{ delay: i * 0.15, duration: 0.4 }}
-              style={{ textAlign: 'center', flex: '0 1 120px' }}
-            >
-              <div style={{
-                width: 36, height: 36, borderRadius: '50%',
-                background: i === 2 ? 'var(--accent)' : 'var(--surface-dim)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 8px',
-                fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15,
-                color: i === 2 ? 'var(--accent-text)' : 'var(--text-muted)',
-              }}>{s.n}</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>{s.title}</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{s.desc}</div>
-            </motion.div>
-          ))}
+        <div style={{ maxWidth: 560, margin: '0 auto' }}>
+          <div className="label" style={{ textAlign: 'center', marginBottom: 24 }}>How crews work</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {[
+              { n: '1', title: 'Save your group', desc: 'Name it, invite members by email.', emoji: '👥' },
+              { n: '2', title: 'Members set it once', desc: 'Dietary, transport, typical availability — answered forever.', emoji: '📝' },
+              { n: '3', title: 'Every hang is 10 seconds', desc: 'Profile auto-fills, “Use my usual” for availability, one tap to confirm.', emoji: '⚡️' },
+            ].map((s, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: '-40px' }}
+                transition={{ delay: i * 0.1, duration: 0.35 }}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 14,
+                  padding: '16px 18px',
+                  background: 'var(--bg)',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: 'var(--radius-lg, 14px)',
+                }}
+              >
+                <div style={{
+                  flexShrink: 0,
+                  width: 38, height: 38, borderRadius: 10,
+                  background: i === 2 ? 'var(--accent)' : 'var(--surface-dim)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 20,
+                }}>
+                  {s.emoji}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', marginBottom: 2 }}>
+                    {s.title}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    {s.desc}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+          <div style={{ textAlign: 'center', marginTop: 20, fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            FOR UNI SOCIETIES · DINNER CLUBS · GAME NIGHTS · STUDY CREWS
+          </div>
         </div>
       </div>
 

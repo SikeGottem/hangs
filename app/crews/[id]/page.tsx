@@ -71,7 +71,11 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
     async function load() {
       const res = await fetch(`/api/crews/${id}/state`)
       if (res.status === 401) { router.replace(`/login?redirect=/crews/${id}`); return }
-      if (!res.ok) { setError(`HTTP ${res.status}`); return }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(`HTTP ${res.status}: ${body.error || 'unknown error'}`)
+        return
+      }
       const data = await res.json()
       if (!cancelled) setState(data)
     }
@@ -105,7 +109,24 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
     }
   }
 
-  if (error) return <div style={{ padding: 40, color: 'var(--error)' }}>{error}</div>
+  if (error) return (
+    <div style={{ maxWidth: 420, margin: '0 auto', padding: '64px 24px', textAlign: 'center' }}>
+      <div style={{ fontSize: 48, marginBottom: 12 }}>·</div>
+      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 800, marginBottom: 8 }}>
+        {error.includes('404') ? 'Crew not found' : error.includes('403') ? 'Not in this crew' : 'Couldn\'t load'}
+      </h1>
+      <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 20 }}>
+        {error.includes('404')
+          ? 'This crew might have been renamed or deleted.'
+          : error.includes('403')
+            ? 'Ask an exec for an invite link, or sign in with the right account.'
+            : 'Something went wrong — try again in a moment.'}
+      </p>
+      <Link href="/crews" className="btn-primary" style={{ padding: '12px 20px', fontSize: 14, display: 'inline-block' }}>
+        ← All crews
+      </Link>
+    </div>
+  )
   if (!state) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading…</div>
 
   const needsProfile = !state.myProfile?.dietary && !state.myProfile?.transportPreference

@@ -809,8 +809,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
       {/* Guest → crew conversion CTA. Shown when the hang belongs to a crew
           with a public invite link — gives responders a frictionless path to
-          "save this crew for next time" after their first hang. */}
-      {data.crew && data.crew.publicInviteToken && data.crew.slug && (
+          "save this crew for next time" after their first hang.
+          Hidden for users who are already crew members. */}
+      {data.crew && data.crew.publicInviteToken && data.crew.slug && !data.viewerIsCrewMember && (
         <GuestCrewConvertCTA
           crewName={data.crew.name}
           crewEmoji={data.crew.coverEmoji}

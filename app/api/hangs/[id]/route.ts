@@ -3,11 +3,11 @@
 // DELETE /api/hangs/[id] — creator-only cascade delete.
 import { NextResponse } from 'next/server'
 import { getDb, ensureSchema, synthesiseFromData } from '@/lib/db'
-import { requireCreator } from '@/lib/auth'
+import { requireCreator, requireUser } from '@/lib/auth'
 import { EditHangSchema, parseBody } from '@/lib/schemas'
 import { serverError, badRequest, unauthorized, notFound } from '@/lib/errors'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const db = getDb()
@@ -93,7 +93,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       }
     }
 
-    return NextResponse.json({ hang, participants, activities, availability, synthesis, crew })
+    // viewerIsCrewMember — set when the session cookie matches a member of this
+    // hang's crew. Used by the results page to hide the guest→crew CTA for
+    // people who are already in.
+    let viewerIsCrewMember = false
+    if (crewId) {
+      const viewer = await requireUser(req)
+      if (viewer) {
+        const memberRes = await db.execute({
+          sql: 'SELECT 1 FROM crew_members WHERE crew_id = ? AND user_id = ?',
+          args: [crewId, viewer.sub],
+        })
+        viewerIsCrewMember = !!memberRes.rows[0]
+      }
+    }
+
+    return NextResponse.json({ hang, participants, activities, availability, synthesis, crew, viewerIsCrewMember })
   } catch (e) {
     return serverError(e, 'GET /api/hangs/[id]')
   }

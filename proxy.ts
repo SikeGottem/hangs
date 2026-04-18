@@ -24,18 +24,22 @@ const limits = hasUpstash
       availability: new Ratelimit({ redis: redis!, limiter: Ratelimit.slidingWindow(60, '1 h'), prefix: 'rl:avail', analytics: false }),
       comments: new Ratelimit({ redis: redis!, limiter: Ratelimit.slidingWindow(30, '1 m'), prefix: 'rl:comments', analytics: false }),
       photos: new Ratelimit({ redis: redis!, limiter: Ratelimit.slidingWindow(10, '1 h'), prefix: 'rl:photos', analytics: false }),
+      magic_link: new Ratelimit({ redis: redis!, limiter: Ratelimit.slidingWindow(10, '1 h'), prefix: 'rl:ml', analytics: false }),
+      crew_write: new Ratelimit({ redis: redis!, limiter: Ratelimit.slidingWindow(20, '1 h'), prefix: 'rl:crew', analytics: false }),
       general: new Ratelimit({ redis: redis!, limiter: Ratelimit.slidingWindow(120, '1 m'), prefix: 'rl:general', analytics: false }),
     }
   : null
 
 function bucketFor(pathname: string, method: string): keyof NonNullable<typeof limits> | null {
-  if (method !== 'POST' && method !== 'DELETE') return null
+  if (method !== 'POST' && method !== 'DELETE' && method !== 'PATCH') return null
   // Order matters: more specific first
+  if (/^\/api\/auth\/request-magic-link$/.test(pathname)) return 'magic_link'
   if (/^\/api\/hangs\/[^/]+\/join$/.test(pathname)) return 'join'
   if (/^\/api\/hangs\/[^/]+\/availability$/.test(pathname)) return 'availability'
   if (/^\/api\/hangs\/[^/]+\/comments$/.test(pathname)) return 'comments'
   if (/^\/api\/hangs\/[^/]+\/photos$/.test(pathname)) return 'photos'
   if (/^\/api\/hangs\/?$/.test(pathname)) return 'create'
+  if (pathname.startsWith('/api/crews')) return 'crew_write'
   if (pathname.startsWith('/api/hangs/')) return 'general'
   return null
 }
@@ -75,6 +79,13 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Only match API routes under /api/hangs; skip everything else.
-  matcher: ['/api/hangs/:path*', '/api/hangs'],
+  // Match API routes that need rate limiting. Includes /api/auth/request-magic-link
+  // and /api/crews/* so the magic-link + crew endpoints get abuse protection.
+  matcher: [
+    '/api/hangs/:path*',
+    '/api/hangs',
+    '/api/auth/request-magic-link',
+    '/api/crews/:path*',
+    '/api/crews',
+  ],
 }
