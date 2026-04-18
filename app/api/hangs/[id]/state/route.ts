@@ -17,6 +17,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       hangRes,
       partRes,
       actRes,
+      actVotesRes,
       availRes,
       commentsRes,
       transportRes,
@@ -40,6 +41,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
           SUM(CASE WHEN av.vote = 'down' THEN 1 ELSE 0 END) as downs
         FROM activities a LEFT JOIN activity_votes av ON av.activity_id = a.id
         WHERE a.hang_id = ? GROUP BY a.id`,
+        args: [id],
+      },
+      {
+        // Per-participant activity votes, for inline edit on the results page.
+        sql: `SELECT av.activity_id, av.participant_id, av.vote
+              FROM activity_votes av
+              JOIN activities a ON a.id = av.activity_id
+              WHERE a.hang_id = ?`,
         args: [id],
       },
       { sql: 'SELECT participant_id, date, hour, status FROM availability WHERE hang_id = ?', args: [id] },
@@ -252,6 +261,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       hang,
       participants,
       activities: actRes.rows,
+      activityVotes: actVotesRes.rows,
       availability: availRes.rows,
       synthesis,
       comments: commentsRes.rows,
