@@ -852,7 +852,16 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
             return (
               <div
                 className="grid-scroll-container"
-                style={{ margin: '0 -20px', padding: '0 20px', userSelect: 'none', touchAction: 'none' }}
+                style={{
+                  margin: '0 -20px',
+                  padding: '0 20px',
+                  userSelect: 'none',
+                  // In transposed (long-range) layout, painting happens horizontally
+                  // across hours so we can let the browser handle vertical scroll —
+                  // fixes the "stuck mid-grid" bug on mobile. In the compact layout
+                  // painting is vertical (across hours as rows) so keep touch-none.
+                  touchAction: transposed ? 'pan-y' : 'none',
+                }}
                 onTouchMove={handleTouchMove}
                 onKeyDown={(e) => {
                   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return
