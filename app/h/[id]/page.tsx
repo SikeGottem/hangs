@@ -806,95 +806,172 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
             />
           )}
 
-          <div
-            className="grid-scroll-container"
-            style={{ margin: '0 -20px', padding: '0 20px', userSelect: 'none', touchAction: 'none' }}
-            onTouchMove={handleTouchMove}
-            onKeyDown={(e) => {
-              if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return
-              if (dates.length === 0) return
-              e.preventDefault()
-              const currentKey = focusedSlot || `${dates[0]}|${HOURS[0]}`
-              const [curDate, curHourStr] = currentKey.split('|')
-              const curDateIdx = Math.max(0, dates.indexOf(curDate))
-              const curHourIdx = Math.max(0, HOURS.indexOf(parseInt(curHourStr)))
-              let nDateIdx = curDateIdx, nHourIdx = curHourIdx
-              if (e.key === 'ArrowLeft')  nDateIdx = Math.max(0, curDateIdx - 1)
-              if (e.key === 'ArrowRight') nDateIdx = Math.min(dates.length - 1, curDateIdx + 1)
-              if (e.key === 'ArrowUp')    nHourIdx = Math.max(0, curHourIdx - 1)
-              if (e.key === 'ArrowDown')  nHourIdx = Math.min(HOURS.length - 1, curHourIdx + 1)
-              if (e.key === 'Home')       { nDateIdx = 0; nHourIdx = 0 }
-              if (e.key === 'End')        { nDateIdx = dates.length - 1; nHourIdx = HOURS.length - 1 }
-              const newKey = `${dates[nDateIdx]}|${HOURS[nHourIdx]}`
-              setFocusedSlot(newKey)
-              cellRefs.current.get(newKey)?.focus()
-            }}
-          >
-            <div
-              ref={gridRef}
-              role="grid"
-              aria-label="Availability grid — arrow keys to navigate, space to cycle free / maybe / busy"
-              aria-rowcount={HOURS.length + 1}
-              aria-colcount={dates.length + 1}
-              style={{
-                display: 'inline-grid',
-                gridTemplateColumns: `60px repeat(${dates.length}, 48px)`,
-                gap: 2,
-              }}
-            >
-              <div role="row" style={{ display: 'contents' }}>
-                <div role="columnheader" aria-hidden="true" />
-                {dates.map(d => (
-                  <div key={d} role="columnheader" className="grid-header">{formatDay(d)}</div>
-                ))}
-              </div>
-              {HOURS.map(h => {
-                const hourLabel = formatHour(h)
-                return (
-                  <div key={h} role="row" style={{ display: 'contents' }}>
-                    <div role="rowheader" style={{
-                      fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6,
-                    }}>{hourLabel}</div>
+          {/* When the date range is > 5 days, the classic days-as-columns layout
+              blows past the viewport width. We transpose to rows-as-dates so
+              the grid scales vertically (natural scroll) and hour cells stretch
+              to fill the container. Threshold of 5 keeps short ranges in the
+              compact side-by-side layout that fits 1-5 days perfectly on mobile. */}
+          {(() => {
+            const transposed = dates.length > 5
+            const cellRenderer = (d: string, h: number) => {
+              const key = `${d}|${h}`
+              const status = slots[key] || "busy"
+              const focusableKey = focusedSlot || `${dates[0]}|${HOURS[0]}`
+              const isFocusable = key === focusableKey
+              const dateObj = new Date(d + "T00:00:00")
+              const fullDay = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dateObj.getDay()]
+              const hourLabel = formatHour(h)
+              const statusWord = status === 'busy' ? 'not free' : status
+              return (
+                <button
+                  key={key}
+                  data-slot-key={key}
+                  ref={(el) => {
+                    if (el) cellRefs.current.set(key, el)
+                    else cellRefs.current.delete(key)
+                  }}
+                  role="gridcell"
+                  aria-label={`${fullDay} ${dateObj.getDate()}, ${hourLabel}, ${statusWord}`}
+                  aria-pressed={status !== 'busy'}
+                  tabIndex={isFocusable ? 0 : -1}
+                  onFocus={() => setFocusedSlot(key)}
+                  onMouseDown={(e) => { e.preventDefault(); handleDragStart(d, h) }}
+                  onMouseEnter={() => handleDragEnter(d, h)}
+                  onTouchStart={() => handleDragStart(d, h)}
+                  onKeyDown={(e) => {
+                    if (e.key === ' ' || e.key === 'Enter') {
+                      e.preventDefault()
+                      toggleSlot(d, h)
+                    }
+                  }}
+                  className={`grid-cell grid-cell-${status}`}
+                  style={{ minWidth: 0, minHeight: transposed ? 26 : undefined }}
+                />
+              )
+            }
+            return (
+              <div
+                className="grid-scroll-container"
+                style={{ margin: '0 -20px', padding: '0 20px', userSelect: 'none', touchAction: 'none' }}
+                onTouchMove={handleTouchMove}
+                onKeyDown={(e) => {
+                  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return
+                  if (dates.length === 0) return
+                  e.preventDefault()
+                  const currentKey = focusedSlot || `${dates[0]}|${HOURS[0]}`
+                  const [curDate, curHourStr] = currentKey.split('|')
+                  const curDateIdx = Math.max(0, dates.indexOf(curDate))
+                  const curHourIdx = Math.max(0, HOURS.indexOf(parseInt(curHourStr)))
+                  let nDateIdx = curDateIdx, nHourIdx = curHourIdx
+                  // Arrow keys map to grid axes, which flip when transposed so
+                  // "left/right" is always the horizontal axis as drawn.
+                  if (transposed) {
+                    if (e.key === 'ArrowLeft')  nHourIdx = Math.max(0, curHourIdx - 1)
+                    if (e.key === 'ArrowRight') nHourIdx = Math.min(HOURS.length - 1, curHourIdx + 1)
+                    if (e.key === 'ArrowUp')    nDateIdx = Math.max(0, curDateIdx - 1)
+                    if (e.key === 'ArrowDown')  nDateIdx = Math.min(dates.length - 1, curDateIdx + 1)
+                  } else {
+                    if (e.key === 'ArrowLeft')  nDateIdx = Math.max(0, curDateIdx - 1)
+                    if (e.key === 'ArrowRight') nDateIdx = Math.min(dates.length - 1, curDateIdx + 1)
+                    if (e.key === 'ArrowUp')    nHourIdx = Math.max(0, curHourIdx - 1)
+                    if (e.key === 'ArrowDown')  nHourIdx = Math.min(HOURS.length - 1, curHourIdx + 1)
+                  }
+                  if (e.key === 'Home')       { nDateIdx = 0; nHourIdx = 0 }
+                  if (e.key === 'End')        { nDateIdx = dates.length - 1; nHourIdx = HOURS.length - 1 }
+                  const newKey = `${dates[nDateIdx]}|${HOURS[nHourIdx]}`
+                  setFocusedSlot(newKey)
+                  cellRefs.current.get(newKey)?.focus()
+                }}
+              >
+                {transposed ? (
+                  // Rows-as-dates layout — scales vertically for long ranges.
+                  <div
+                    ref={gridRef}
+                    role="grid"
+                    aria-label="Availability grid — arrow keys to navigate, space to cycle free / maybe / busy"
+                    aria-rowcount={dates.length + 1}
+                    aria-colcount={HOURS.length + 1}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `minmax(72px, max-content) repeat(${HOURS.length}, minmax(0, 1fr))`,
+                      gap: 2,
+                      width: '100%',
+                    }}
+                  >
+                    <div role="row" style={{ display: 'contents' }}>
+                      <div role="columnheader" aria-hidden="true" />
+                      {HOURS.map(h => (
+                        <div
+                          key={h}
+                          role="columnheader"
+                          style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-muted)',
+                            textAlign: 'center', padding: '2px 0', fontWeight: 600,
+                          }}
+                        >
+                          {/* Show hour labels only every 2 hours at the narrowest layouts
+                              so they don't crash into each other. CSS handles the ellipsis. */}
+                          {formatHour(h).replace(/am|pm/, m => m[0])}
+                        </div>
+                      ))}
+                    </div>
                     {dates.map(d => {
-                      const key = `${d}|${h}`
-                      const status = slots[key] || "busy"
-                      const focusableKey = focusedSlot || `${dates[0]}|${HOURS[0]}`
-                      const isFocusable = key === focusableKey
                       const dateObj = new Date(d + "T00:00:00")
-                      const fullDay = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dateObj.getDay()]
-                      const statusWord = status === 'busy' ? 'not free' : status
                       return (
-                        <button
-                          key={key}
-                          data-slot-key={key}
-                          ref={(el) => {
-                            if (el) cellRefs.current.set(key, el)
-                            else cellRefs.current.delete(key)
-                          }}
-                          role="gridcell"
-                          aria-label={`${fullDay} ${dateObj.getDate()}, ${hourLabel}, ${statusWord}`}
-                          aria-pressed={status !== 'busy'}
-                          tabIndex={isFocusable ? 0 : -1}
-                          onFocus={() => setFocusedSlot(key)}
-                          onMouseDown={(e) => { e.preventDefault(); handleDragStart(d, h) }}
-                          onMouseEnter={() => handleDragEnter(d, h)}
-                          onTouchStart={() => handleDragStart(d, h)}
-                          onKeyDown={(e) => {
-                            if (e.key === ' ' || e.key === 'Enter') {
-                              e.preventDefault()
-                              toggleSlot(d, h)
-                            }
-                          }}
-                          className={`grid-cell grid-cell-${status}`}
-                        />
+                        <div key={d} role="row" style={{ display: 'contents' }}>
+                          <div role="rowheader" style={{
+                            fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700,
+                            display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
+                            paddingRight: 8, color: 'var(--text-primary)',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {formatDay(d)}
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-muted)', marginLeft: 4 }}>
+                              {dateObj.getDate()}
+                            </span>
+                          </div>
+                          {HOURS.map(h => cellRenderer(d, h))}
+                        </div>
                       )
                     })}
                   </div>
-                )
-              })}
-            </div>
-          </div>
+                ) : (
+                  // Classic columns-as-dates layout — compact for 1-5 days.
+                  <div
+                    ref={gridRef}
+                    role="grid"
+                    aria-label="Availability grid — arrow keys to navigate, space to cycle free / maybe / busy"
+                    aria-rowcount={HOURS.length + 1}
+                    aria-colcount={dates.length + 1}
+                    style={{
+                      display: 'inline-grid',
+                      gridTemplateColumns: `60px repeat(${dates.length}, 48px)`,
+                      gap: 2,
+                    }}
+                  >
+                    <div role="row" style={{ display: 'contents' }}>
+                      <div role="columnheader" aria-hidden="true" />
+                      {dates.map(d => (
+                        <div key={d} role="columnheader" className="grid-header">{formatDay(d)}</div>
+                      ))}
+                    </div>
+                    {HOURS.map(h => {
+                      const hourLabel = formatHour(h)
+                      return (
+                        <div key={h} role="row" style={{ display: 'contents' }}>
+                          <div role="rowheader" style={{
+                            fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6,
+                          }}>{hourLabel}</div>
+                          {dates.map(d => cellRenderer(d, h))}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           <button onClick={submitAvailability} className="btn-primary">Next</button>
         </motion.div>
