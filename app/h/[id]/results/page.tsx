@@ -111,8 +111,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         hang: d.hang,
         participants: d.participants,
         activities: d.activities,
+        activityVotes: d.activityVotes || [],
         availability: d.availability,
         synthesis: d.synthesis,
+        crew: d.crew || null,
+        viewerIsCrewMember: !!d.viewerIsCrewMember,
       })
       setComments(d.comments || [])
       setTransport(d.transport || [])
@@ -1423,12 +1426,18 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
       {/* Activity results */}
       <div style={{ marginBottom: 24 }}>
-        <div className="label" style={{ marginBottom: 10 }}>Activity votes</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div className="label">Activity votes</div>
+          {myPid && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>tap to change yours</div>}
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {sortedActivities.map((a: any) => {
             const isTopPick = a.id === topActivityId
             const outdoor = isOutdoor(a.name)
             const hasVotes = (a.ups || 0) + (a.mehs || 0) + (a.downs || 0) > 0
+            const myVote = myPid
+              ? (data.activityVotes || []).find((v: any) => v.activity_id === a.id && v.participant_id === myPid)?.vote
+              : null
             return (
               <div key={a.id} className="card" style={{ padding: '14px 18px', border: isTopPick ? '2px solid var(--accent)' : '1px solid var(--border-light)', position: 'relative' }}>
                 {isTopPick && (
@@ -1453,10 +1462,53 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                     )}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 13, marginTop: 2 }}>
-                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>{a.ups || 0} keen</span>
-                  <span style={{ color: '#B8940F' }}>{a.mehs || 0} meh</span>
-                  <span style={{ color: 'var(--error)' }}>{a.downs || 0} nah</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                    <span style={{ color: 'var(--success)', fontWeight: 600 }}>{a.ups || 0} keen</span>
+                    <span style={{ color: '#B8940F' }}>{a.mehs || 0} meh</span>
+                    <span style={{ color: 'var(--error)' }}>{a.downs || 0} nah</span>
+                  </div>
+                  {myPid && (
+                    <VoteButtons
+                      myVote={myVote}
+                      onVote={async (vote) => {
+                        // Optimistic update: adjust counts + myVote locally, then POST.
+                        setData((prev: any) => {
+                          if (!prev) return prev
+                          const prevVote = myVote
+                          const activities = prev.activities.map((act: any) => {
+                            if (act.id !== a.id) return act
+                            const next = { ...act }
+                            const bump = (k: string, n: number) => { next[k] = Math.max(0, (next[k] || 0) + n) }
+                            if (prevVote === 'up') bump('ups', -1)
+                            if (prevVote === 'meh') bump('mehs', -1)
+                            if (prevVote === 'down') bump('downs', -1)
+                            if (vote === 'up') bump('ups', 1)
+                            if (vote === 'meh') bump('mehs', 1)
+                            if (vote === 'down') bump('downs', 1)
+                            return next
+                          })
+                          const otherVotes = (prev.activityVotes || [])
+                            .filter((v: any) => !(v.activity_id === a.id && v.participant_id === myPid))
+                          return {
+                            ...prev,
+                            activities,
+                            activityVotes: [...otherVotes, { activity_id: a.id, participant_id: myPid, vote }],
+                          }
+                        })
+                        try {
+                          await fetch(`/api/hangs/${id}/vote`, {
+                            method: 'POST',
+                            headers: authHeaders(),
+                            body: JSON.stringify({ activityId: a.id, vote }),
+                          })
+                        } catch {
+                          showToast('Vote failed — refreshing…', 'error')
+                          fetchState()
+                        }
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             )
@@ -2121,6 +2173,49 @@ function Confetti() {
           100% { transform: translateY(100vh) rotate(${360 + Math.random() * 360}deg); opacity: 0; }
         }
       `}</style>
+    </div>
+  )
+}
+
+type VoteValue = 'up' | 'meh' | 'down'
+
+// Inline keen/meh/nah selector shown on each activity row once a responder
+// has joined. Tapping an already-selected vote is a no-op; tapping a
+// different one swaps it. Optimistic updates are handled by the caller.
+function VoteButtons({ myVote, onVote }: { myVote: VoteValue | null | undefined; onVote: (v: VoteValue) => void }) {
+  const options: { v: VoteValue; label: string; bg: string; color: string; border: string }[] = [
+    { v: 'up',   label: 'Keen', bg: '#34C26A', color: '#fff', border: '#2AA359' },
+    { v: 'meh',  label: 'Meh',  bg: '#F5C842', color: '#1A1A1A', border: '#DAA816' },
+    { v: 'down', label: 'Nah',  bg: '#EF5A5A', color: '#fff', border: '#C94141' },
+  ]
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {options.map(o => {
+        const active = myVote === o.v
+        return (
+          <button
+            key={o.v}
+            onClick={e => { e.preventDefault(); if (!active) onVote(o.v) }}
+            aria-pressed={active}
+            aria-label={`Vote ${o.label}${active ? ' (selected)' : ''}`}
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: 'var(--font-display)',
+              padding: '5px 9px',
+              borderRadius: 6,
+              cursor: active ? 'default' : 'pointer',
+              background: active ? o.bg : 'var(--surface)',
+              color: active ? o.color : 'var(--text-muted)',
+              border: `1.5px solid ${active ? o.border : 'var(--border-light)'}`,
+              whiteSpace: 'nowrap',
+              transition: 'all 0.1s ease',
+            }}
+          >
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
