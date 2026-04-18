@@ -14,6 +14,10 @@ export default function NewCrew() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [me, setMe] = useState<{ user: any } | null>(null)
+  // When Resend isn't configured, the API returns per-invite devLinks that
+  // the exec needs to copy-paste manually. Hold them until dismissed.
+  const [devLinks, setDevLinks] = useState<{ email: string; link: string }[] | null>(null)
+  const [createdCrewId, setCreatedCrewId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/me').then(r => r.json()).then(setMe)
@@ -46,7 +50,18 @@ export default function NewCrew() {
         const j = await res.json().catch(() => ({}))
         throw new Error(j.error || `HTTP ${res.status}`)
       }
-      const { crew } = await res.json()
+      const { crew, invited } = await res.json()
+      const links = (invited || [])
+        .filter((i: any) => i.ok && i.devLink)
+        .map((i: any) => ({ email: i.email, link: i.devLink }))
+      if (links.length > 0) {
+        // Show the links so exec can paste them into DMs. Don't navigate away
+        // until user dismisses.
+        setDevLinks(links)
+        setCreatedCrewId(crew.id)
+        setLoading(false)
+        return
+      }
       router.push(`/crews/${crew.id}`)
     } catch (e: any) {
       setError(e.message || 'Something went wrong')
@@ -55,6 +70,34 @@ export default function NewCrew() {
   }
 
   if (!me || !me.user) return null
+
+  // Post-create: show the copy-paste invite links when email wasn't sent
+  if (devLinks && createdCrewId) {
+    return (
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: '32px 24px' }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, letterSpacing: '-0.04em', margin: '0 0 8px' }}>
+            Crew created ✓
+          </h1>
+          <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 20px' }}>
+            Email isn&apos;t set up yet, so your members won&apos;t get invite emails. Copy these links and paste them into DMs / your group chat:
+          </p>
+        </motion.div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+          {devLinks.map(dl => (
+            <DevLinkRow key={dl.email} email={dl.email} link={dl.link} />
+          ))}
+        </div>
+        <button
+          onClick={() => router.push(`/crews/${createdCrewId}`)}
+          className="btn-primary"
+          style={{ padding: 14, fontSize: 15, width: '100%' }}
+        >
+          Continue to crew
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '32px 24px' }}>
@@ -174,6 +217,41 @@ export default function NewCrew() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+function DevLinkRow({ email, link }: { email: string; link: string }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch { /* ignore */ }
+  }
+  return (
+    <div style={{
+      padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: 10,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>{email}</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', wordBreak: 'break-all', marginTop: 2 }}>
+          {link.length > 60 ? link.slice(0, 58) + '…' : link}
+        </div>
+      </div>
+      <button
+        onClick={copy}
+        style={{
+          fontSize: 11, fontWeight: 700, padding: '6px 10px', borderRadius: 6,
+          background: copied ? 'var(--free-light, #E8F8EE)' : 'var(--accent)',
+          color: copied ? 'var(--success, #1a7a3a)' : 'var(--accent-text)',
+          border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+        }}
+      >
+        {copied ? '✓ Copied' : 'Copy'}
+      </button>
     </div>
   )
 }

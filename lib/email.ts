@@ -23,7 +23,10 @@ export function buildMagicLink(token: string, origin?: string): string {
   return `${base}/api/auth/verify?token=${encodeURIComponent(token)}`
 }
 
-export async function sendMagicLink(ctx: MagicLinkContext & { origin?: string }): Promise<void> {
+// Returns { emailed, link } so callers can fall back to showing the link
+// directly when no email provider is configured (early-launch, no Resend yet).
+// The link is always returned; `emailed` tells you whether it was actually sent.
+export async function sendMagicLink(ctx: MagicLinkContext & { origin?: string }): Promise<{ emailed: boolean; link: string }> {
   const link = buildMagicLink(ctx.token, ctx.origin)
   const isInvite = !!ctx.crewName
 
@@ -57,10 +60,10 @@ export async function sendMagicLink(ctx: MagicLinkContext & { origin?: string })
     : `Sign in to hangs: ${link}\n\nThis link expires in 15 minutes.`
 
   if (!resend) {
-    console.log('\n[hangs:email] RESEND_API_KEY not set — dev fallback. Magic link for', ctx.email)
+    console.log('\n[hangs:email] RESEND_API_KEY not set — returning link to client. Magic link for', ctx.email)
     console.log('[hangs:email] ', link)
     console.log()
-    return
+    return { emailed: false, link }
   }
 
   const { error } = await resend.emails.send({
@@ -75,4 +78,5 @@ export async function sendMagicLink(ctx: MagicLinkContext & { origin?: string })
     console.error('[hangs:email] Resend error:', error)
     throw new Error('Failed to send email')
   }
+  return { emailed: true, link }
 }

@@ -53,14 +53,14 @@ export async function POST(req: Request) {
 
     // Fan out invites (best-effort — don't fail the whole request if one email errors).
     const origin = new URL(req.url).origin
-    const inviteResults: { email: string; ok: boolean; reason?: string }[] = []
+    const inviteResults: { email: string; ok: boolean; reason?: string; devLink?: string }[] = []
     if (inviteEmails?.length) {
       for (const raw of inviteEmails) {
         const email = raw.trim().toLowerCase()
         if (!email || email === creatorEmail) continue
         try {
-          await inviteToCrew(db, { email, crewId, crewName: name, inviterName: creatorDisplay, origin })
-          inviteResults.push({ email, ok: true })
+          const r = await inviteToCrew(db, { email, crewId, crewName: name, inviterName: creatorDisplay, origin })
+          inviteResults.push({ email, ok: true, devLink: r.emailed ? undefined : r.link })
         } catch (e: any) {
           console.warn('[hangs] invite failed for', email, e?.message)
           inviteResults.push({ email, ok: false, reason: e?.message })
@@ -91,10 +91,12 @@ function slugify(s: string): string {
 }
 
 // Shared helper (exported for members route reuse).
+// Returns { emailed, link } — when no email provider is configured, callers
+// should surface the link so the exec can paste it into a DM / group chat.
 export async function inviteToCrew(
   db: ReturnType<typeof getDb>,
   params: { email: string; crewId: string; crewName: string; inviterName: string; origin?: string },
-) {
+): Promise<{ emailed: boolean; link: string }> {
   // Find-or-create the invitee user
   const existing = await db.execute({
     sql: 'SELECT id FROM users WHERE email = ?',
@@ -134,11 +136,12 @@ export async function inviteToCrew(
     args: [token, userId, params.email, `/crews/${params.crewId}/profile`, expiresAt],
   })
 
-  await sendMagicLink({
+  const result = await sendMagicLink({
     email: params.email,
     token,
     crewName: params.crewName,
     inviterName: params.inviterName,
     origin: params.origin,
   })
+  return result
 }

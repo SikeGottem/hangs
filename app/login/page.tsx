@@ -30,6 +30,13 @@ function LoginInner() {
         const j = await res.json().catch(() => ({}))
         throw new Error(j.error || `HTTP ${res.status}`)
       }
+      const data = await res.json().catch(() => ({}))
+      if (data.devLink) {
+        // No email provider configured — navigate straight to the verify URL
+        // which sets the session cookie and redirects into the app.
+        window.location.href = data.devLink
+        return
+      }
       setSent(true)
     } catch (err: any) {
       setError(err.message || 'Something went wrong')

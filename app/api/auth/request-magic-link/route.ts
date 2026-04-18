@@ -79,7 +79,13 @@ export async function POST(req: Request) {
     // Use the incoming request's origin for the link so dev port changes (3000 → 3003)
     // don't leave users clicking links that point to the wrong port.
     const origin = new URL(req.url).origin
-    await sendMagicLink({ email, token, origin })
+    const result = await sendMagicLink({ email, token, origin })
+
+    // When Resend isn't configured, return the link directly so the client
+    // can auto-navigate. Enables "launch without email provider" mode.
+    if (!result.emailed) {
+      return NextResponse.json({ ok: true, devLink: result.link })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (e) {

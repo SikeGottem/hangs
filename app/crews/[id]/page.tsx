@@ -65,6 +65,7 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
   const [showInvite, setShowInvite] = useState(false)
   const [inviteText, setInviteText] = useState('')
   const [inviteBusy, setInviteBusy] = useState(false)
+  const [inviteDevLinks, setInviteDevLinks] = useState<{ email: string; link: string }[] | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -97,8 +98,16 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
         body: JSON.stringify({ emails }),
       })
       if (!res.ok) throw new Error('invite failed')
+      const data = await res.json()
+      const links = (data.invited || [])
+        .filter((i: any) => i.ok && i.devLink)
+        .map((i: any) => ({ email: i.email, link: i.devLink }))
       setInviteText('')
-      setShowInvite(false)
+      if (links.length > 0) {
+        setInviteDevLinks(links)
+      } else {
+        setShowInvite(false)
+      }
       // refresh
       const r = await fetch(`/api/crews/${id}/state`)
       if (r.ok) setState(await r.json())
@@ -234,25 +243,47 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
       >
         {showInvite && (
           <div style={{ marginBottom: 12, padding: 12, background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: 10 }}>
-            <textarea
-              value={inviteText}
-              onChange={e => setInviteText(e.target.value)}
-              placeholder="email addresses, one per line or comma-separated"
-              rows={3}
-              style={{
-                width: '100%', padding: 10, fontSize: 13, borderRadius: 8,
-                border: '1px solid var(--border-light)', resize: 'vertical',
-                fontFamily: 'var(--font-mono), monospace',
-              }}
-            />
-            <button
-              onClick={handleInvite}
-              disabled={inviteBusy}
-              className="btn-primary"
-              style={{ padding: '8px 14px', fontSize: 13, marginTop: 8 }}
-            >
-              {inviteBusy ? 'Sending…' : 'Send invites'}
-            </button>
+            {inviteDevLinks ? (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Copy these links to send</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                  Email isn&apos;t configured, so invites weren&apos;t sent automatically. Paste these into DMs:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {inviteDevLinks.map(dl => (
+                    <CopyInviteRow key={dl.email} email={dl.email} link={dl.link} />
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setInviteDevLinks(null); setShowInvite(false) }}
+                  style={{ marginTop: 10, padding: '8px 14px', fontSize: 13, background: 'none', border: '1.5px solid var(--border-light)', borderRadius: 8, cursor: 'pointer' }}
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <>
+                <textarea
+                  value={inviteText}
+                  onChange={e => setInviteText(e.target.value)}
+                  placeholder="email addresses, one per line or comma-separated"
+                  rows={3}
+                  style={{
+                    width: '100%', padding: 10, fontSize: 13, borderRadius: 8,
+                    border: '1px solid var(--border-light)', resize: 'vertical',
+                    fontFamily: 'var(--font-mono), monospace',
+                  }}
+                />
+                <button
+                  onClick={handleInvite}
+                  disabled={inviteBusy}
+                  className="btn-primary"
+                  style={{ padding: '8px 14px', fontSize: 13, marginTop: 8 }}
+                >
+                  {inviteBusy ? 'Sending…' : 'Send invites'}
+                </button>
+              </>
+            )}
           </div>
         )}
         <List>
@@ -690,6 +721,37 @@ function BrandingSection({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function CopyInviteRow({ email, link }: { email: string; link: string }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600) } catch { /* ignore */ }
+  }
+  return (
+    <div style={{
+      padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--border-light)', borderRadius: 8,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>{email}</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+          {link.length > 50 ? link.slice(0, 48) + '…' : link}
+        </div>
+      </div>
+      <button
+        onClick={copy}
+        style={{
+          fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5,
+          background: copied ? 'var(--free-light, #E8F8EE)' : 'var(--accent)',
+          color: copied ? 'var(--success, #1a7a3a)' : 'var(--accent-text)',
+          border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+        }}
+      >
+        {copied ? '✓' : 'Copy'}
+      </button>
     </div>
   )
 }

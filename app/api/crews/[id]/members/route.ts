@@ -40,14 +40,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const inviterName = (me.display_name as string | null) || (me.email as string).split('@')[0]
     const origin = new URL(req.url).origin
-    const results: { email: string; ok: boolean; reason?: string }[] = []
+    const results: { email: string; ok: boolean; reason?: string; devLink?: string }[] = []
 
     for (const raw of parsed.data.emails) {
       const email = raw.trim().toLowerCase()
       if (!email) continue
       try {
-        await inviteToCrew(db, { email, crewId: id, crewName, inviterName, origin })
-        results.push({ email, ok: true })
+        const r = await inviteToCrew(db, { email, crewId: id, crewName, inviterName, origin })
+        results.push({ email, ok: true, devLink: r.emailed ? undefined : r.link })
         logEvent('member_invited', { userId: claims.sub, crewId: id, metadata: { email } })
       } catch (e: any) {
         results.push({ email, ok: false, reason: e?.message })
