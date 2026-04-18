@@ -1262,57 +1262,116 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         )}
       </div>
 
-      {/* Availability heatmap */}
-      {heatmap && dates.length > 0 && (
+      {/* Availability heatmap — transposes to rows-as-dates when range > 5 days
+          so it doesn't overflow on mobile. Mirrors the responder grid logic. */}
+      {heatmap && dates.length > 0 && (() => {
+        const transposed = dates.length > 5
+        const cellFor = (d: string, h: number) => {
+          const key = `${d}|${h}`
+          const cell = heatmap.heatmap[key]
+          const ratio = cell?.ratio || 0
+          const bg = ratio === 0 ? 'var(--surface-dim)' : ratio >= 0.8 ? '#22A85280' : ratio >= 0.5 ? '#34C26A40' : ratio >= 0.25 ? '#F5C84240' : '#E8E3D920'
+          const isHovered = hoverSlot === key
+          const dayObj = new Date(d + 'T00:00:00')
+          const fullDay = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayObj.getDay()]
+          const hourLabel = formatHour(h)
+          const cellLabel = cell && cell.total > 0
+            ? `${fullDay} ${hourLabel}: ${cell.total} of ${cell.maxTotal || cell.total} people available`
+            : `${fullDay} ${hourLabel}: no one yet`
+          return (
+            <div
+              key={key}
+              role="cell"
+              aria-label={cellLabel}
+              onMouseEnter={() => setHoverSlot(key)}
+              onMouseLeave={() => setHoverSlot(null)}
+              onClick={() => setHoverSlot(hoverSlot === key ? null : key)}
+              style={{
+                ...(transposed
+                  ? { width: '100%', minHeight: 26, minWidth: 0 }
+                  : { width: 48, height: 36 }),
+                borderRadius: 6, background: bg,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: 600, color: ratio >= 0.5 ? '#1a7a3a' : 'var(--text-muted)',
+                cursor: cell?.total ? 'pointer' : 'default',
+                position: 'relative',
+                outline: isHovered && cell?.total ? '2px solid var(--accent)' : 'none',
+                outlineOffset: -1,
+                transition: 'outline 0.1s ease',
+              }}
+            >
+              {cell && cell.total > 0 ? cell.total : ''}
+            </div>
+          )
+        }
+
+        return (
         <div className="card" style={{ padding: 16, marginBottom: 24, overflowX: 'auto', position: 'relative' }}>
           <div className="label" id={`heatmap-label-${id}`} style={{ marginBottom: 10 }}>Availability heatmap</div>
-          <div role="table" aria-labelledby={`heatmap-label-${id}`} style={{ display: 'inline-grid', gridTemplateColumns: `54px repeat(${dates.length}, 48px)`, gap: 2 }}>
-            <div role="row" style={{ display: 'contents' }}>
-              <div role="columnheader" aria-hidden="true" />
-              {dates.map(d => <div key={d} role="columnheader" className="grid-header">{formatDay(d)}</div>)}
-            </div>
-            {HOURS.map(h => {
-              const hourLabel = formatHour(h)
-              return (
-              <div key={h} role="row" style={{ display: 'contents' }}>
-                <div role="rowheader" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6 }}>{hourLabel}</div>
-                {dates.map(d => {
-                  const key = `${d}|${h}`
-                  const cell = heatmap.heatmap[key]
-                  const ratio = cell?.ratio || 0
-                  const bg = ratio === 0 ? 'var(--surface-dim)' : ratio >= 0.8 ? '#22A85280' : ratio >= 0.5 ? '#34C26A40' : ratio >= 0.25 ? '#F5C84240' : '#E8E3D920'
-                  const isHovered = hoverSlot === key
-                  const dayObj = new Date(d + 'T00:00:00')
-                  const fullDay = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayObj.getDay()]
-                  const cellLabel = cell && cell.total > 0
-                    ? `${fullDay} ${hourLabel}: ${cell.total} of ${cell.maxTotal || cell.total} people available`
-                    : `${fullDay} ${hourLabel}: no one yet`
-                  return (
-                    <div
-                      key={key}
-                      role="cell"
-                      aria-label={cellLabel}
-                      onMouseEnter={() => setHoverSlot(key)}
-                      onMouseLeave={() => setHoverSlot(null)}
-                      onClick={() => setHoverSlot(hoverSlot === key ? null : key)}
-                      style={{
-                        width: 48, height: 36, borderRadius: 6, background: bg,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, fontWeight: 600, color: ratio >= 0.5 ? '#1a7a3a' : 'var(--text-muted)',
-                        cursor: cell?.total ? 'pointer' : 'default',
-                        position: 'relative',
-                        outline: isHovered && cell?.total ? '2px solid var(--accent)' : 'none',
-                        outlineOffset: -1,
-                        transition: 'outline 0.1s ease',
-                      }}
-                    >
-                      {cell && cell.total > 0 ? cell.total : ''}
-                    </div>
-                  )
-                })}
+          {transposed ? (
+            // Rows-as-dates layout for long ranges — hours stretch to container width.
+            <div
+              role="table"
+              aria-labelledby={`heatmap-label-${id}`}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `minmax(72px, max-content) repeat(${HOURS.length}, minmax(0, 1fr))`,
+                gap: 2,
+                width: '100%',
+              }}
+            >
+              <div role="row" style={{ display: 'contents' }}>
+                <div role="columnheader" aria-hidden="true" />
+                {HOURS.map(h => (
+                  <div
+                    key={h}
+                    role="columnheader"
+                    style={{
+                      fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-muted)',
+                      textAlign: 'center', padding: '2px 0', fontWeight: 600,
+                    }}
+                  >
+                    {formatHour(h).replace(/am|pm/, m => m[0])}
+                  </div>
+                ))}
               </div>
-            )})}
-          </div>
+              {dates.map(d => {
+                const dateObj = new Date(d + 'T00:00:00')
+                return (
+                  <div key={d} role="row" style={{ display: 'contents' }}>
+                    <div role="rowheader" style={{
+                      fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700,
+                      display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
+                      paddingRight: 8, color: 'var(--text-primary)', whiteSpace: 'nowrap',
+                    }}>
+                      {formatDay(d)}
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-muted)', marginLeft: 4 }}>
+                        {dateObj.getDate()}
+                      </span>
+                    </div>
+                    {HOURS.map(h => cellFor(d, h))}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            // Classic columns-as-dates layout for 1-5 day ranges.
+            <div role="table" aria-labelledby={`heatmap-label-${id}`} style={{ display: 'inline-grid', gridTemplateColumns: `54px repeat(${dates.length}, 48px)`, gap: 2 }}>
+              <div role="row" style={{ display: 'contents' }}>
+                <div role="columnheader" aria-hidden="true" />
+                {dates.map(d => <div key={d} role="columnheader" className="grid-header">{formatDay(d)}</div>)}
+              </div>
+              {HOURS.map(h => {
+                const hourLabel = formatHour(h)
+                return (
+                  <div key={h} role="row" style={{ display: 'contents' }}>
+                    <div role="rowheader" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6 }}>{hourLabel}</div>
+                    {dates.map(d => cellFor(d, h))}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {/* Tooltip */}
           {hoverSlot && heatmap.heatmap[hoverSlot]?.total > 0 && (() => {
@@ -1359,7 +1418,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             )
           })()}
         </div>
-      )}
+        )
+      })()}
 
       {/* Activity results */}
       <div style={{ marginBottom: 24 }}>
