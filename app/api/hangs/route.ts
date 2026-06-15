@@ -14,12 +14,12 @@ export async function POST(req: Request) {
     if ('error' in parsed) return badRequest(parsed.error)
     const body = parsed.data
 
-    // Crew-scoped hang: verify the caller is a logged-in member of that crew.
-    // Falls through to guest flow (user=null, crew_id=null) when crewId absent.
-    let userClaims = null
+    // Always resolve the session (if any) so a logged-in creator's participant
+    // row links to their account — that's what powers cross-device "Your hangs".
+    // Guests stay user=null and rely on localStorage + email recovery.
+    const userClaims = await requireUser(req)
     let crewMemberDisplay: string | null = null
     if (body.crewId) {
-      userClaims = await requireUser(req)
       if (!userClaims) return forbidden('Sign in to create a crew hang')
       const db0 = getDb()
       await ensureSchema()
@@ -71,8 +71,8 @@ export async function POST(req: Request) {
           sql: `INSERT INTO hangs (id, name, creator_name, creator_id, date_range_start, date_range_end,
                   date_mode, selected_dates, template, location, duration,
                   description, theme, dress_code, response_deadline, ask_dietary, custom_question,
-                  crew_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  crew_id, time_granularity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           args: [
             hangId,
             body.name,
@@ -92,6 +92,7 @@ export async function POST(req: Request) {
             body.askDietary ? 1 : 0,
             body.customQuestion || null,
             body.crewId || null,
+            body.timeGranularity || 'blocks',
           ],
         },
         {

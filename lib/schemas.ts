@@ -46,6 +46,10 @@ export const CreateHangSchema = z.object({
   template: OptionalShortText(40),
   location: SafeLocation,
   duration: z.number().int().min(1).max(24).default(2),
+  // How precise we ask responders to be about their availability. Blocks =
+  // morning/afternoon/evening/night (4 pills per day, thumb-friendly).
+  // Hourly = the per-hour drag grid (when creators need real precision).
+  timeGranularity: z.enum(['blocks', 'hourly']).optional(),
   // Phase 2 Extras — all optional creator-seeded fields
   description: OptionalShortText(300),
   theme: OptionalShortText(60),
@@ -64,6 +68,11 @@ export const CreateHangSchema = z.object({
 // pulls display_name + dietary from their crew profile in that case.
 export const JoinSchema = z.object({
   name: ShortText(50).optional(),
+})
+
+// ── POST /api/hangs/[id]/send-link ── email the creator their own link
+export const SendLinkSchema = z.object({
+  email: z.string().trim().email('Enter a valid email').max(200),
 })
 
 // ── POST /api/hangs/[id]/availability ──
@@ -172,7 +181,8 @@ export const CommitmentSchema = z.object({
 })
 
 // ── PATCH /api/hangs/[id] ──  creator-only editable fields
-// Dates are NOT in here — they require a destructive confirmation path.
+// Dates ARE editable: send a full date spec (dateMode + range or selectedDates).
+// The route revalidates the combo and prunes availability for any removed dates.
 export const EditHangSchema = z
   .object({
     name: ShortText(120).optional(),
@@ -183,6 +193,10 @@ export const EditHangSchema = z
     customQuestion: OptionalShortText(200),
     askDietary: z.boolean().optional(),
     responseDeadline: DateStr.optional().or(z.literal('')),
+    dateMode: z.enum(['range', 'specific']).optional(),
+    dateRangeStart: DateStr.optional(),
+    dateRangeEnd: DateStr.optional(),
+    selectedDates: z.array(DateStr).max(31).optional(),
   })
   .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
 

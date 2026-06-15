@@ -31,22 +31,24 @@ const parseIso = (s: string) => startOfDay(new Date(s + 'T00:00:00'))
 type Preset = {
   key: string
   label: string
-  emoji: string
+  icon: React.ReactElement
   // How it should map into range OR specific-days depending on current mode.
   computeRange: (today: Date) => { start: Date; end: Date }
 }
+
+const IP = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
 
 const PRESETS: Preset[] = [
   {
     key: 'tonight',
     label: 'Tonight',
-    emoji: '🌙',
+    icon: <svg {...IP}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
     computeRange: (today) => ({ start: today, end: today }),
   },
   {
     key: 'tomorrow',
     label: 'Tomorrow',
-    emoji: '☀️',
+    icon: <svg {...IP}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>,
     computeRange: (today) => {
       const t = addDays(today, 1)
       return { start: t, end: t }
@@ -55,7 +57,7 @@ const PRESETS: Preset[] = [
   {
     key: 'thisFriday',
     label: 'This Friday',
-    emoji: '🍻',
+    icon: <svg {...IP}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
     computeRange: (today) => {
       const day = today.getDay() // 0 Sun .. 6 Sat
       // If today IS Friday and it's not late, "this Friday" = today.
@@ -68,7 +70,7 @@ const PRESETS: Preset[] = [
   {
     key: 'thisWeekend',
     label: 'This weekend',
-    emoji: '🎉',
+    icon: <svg {...IP}><path d="M2 12h2"/><path d="M4 7h2"/><path d="M4 17h2"/><path d="M18 7h2"/><path d="M18 17h2"/><path d="M20 12h2"/><path d="M7 7v10"/><path d="M17 7v10"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>,
     computeRange: (today) => {
       const day = today.getDay()
       // If today is Fri/Sat/Sun, this weekend is today → next Sunday.
@@ -84,7 +86,7 @@ const PRESETS: Preset[] = [
   {
     key: 'nextWeekend',
     label: 'Next weekend',
-    emoji: '🏖️',
+    icon: <svg {...IP}><path d="M3 18h18"/><path d="M12 4v14"/><path d="M8 18c0-3 2-6 4-6s4 3 4 6"/><circle cx="16" cy="7" r="2"/></svg>,
     computeRange: (today) => {
       const day = today.getDay()
       // Next weekend = the Friday AFTER this weekend.
@@ -366,7 +368,7 @@ export default function DatePicker({ value, onChange }: Props) {
             onClick={() => applyPreset(p)}
             aria-label={`Pick ${p.label}`}
           >
-            <span aria-hidden="true">{p.emoji}</span> {p.label}
+            <span style={{ display: 'inline-flex', lineHeight: 1, marginRight: 4 }}>{p.icon}</span>{p.label}
           </button>
         ))}
       </div>

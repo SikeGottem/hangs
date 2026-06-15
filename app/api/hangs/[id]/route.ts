@@ -7,6 +7,20 @@ import { requireCreator, requireUser } from '@/lib/auth'
 import { EditHangSchema, parseBody } from '@/lib/schemas'
 import { serverError, badRequest, unauthorized, notFound } from '@/lib/errors'
 
+// Expand a YYYY-MM-DD start..end (inclusive) into a list of dates, capped at 31.
+// Parsed + incremented in UTC so the round-trip through toISOString() never
+// shifts a day (a local-tz parse here drops every date back one day in AEST).
+function expandDateRange(start: string, end: string): string[] {
+  const dates: string[] = []
+  const d = new Date(start + 'T00:00:00Z')
+  const e = new Date(end + 'T00:00:00Z')
+  while (d <= e && dates.length < 31) {
+    dates.push(d.toISOString().split('T')[0])
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return dates
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
@@ -157,15 +171,58 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     if (body.responseDeadline !== undefined) pushField('response_deadline', body.responseDeadline)
 
+    // ── Date editing ──────────────────────────────────────────────────────
+    // Dates can be added/changed after creation. The client sends a full date
+    // spec (dateMode + range OR selectedDates), mirroring the create flow.
+    // Adding dates is non-destructive (existing availability stays valid, new
+    // dates just start empty); only dates that fall OUTSIDE the new set get
+    // their availability pruned below.
+    let newValidDates: string[] | null = null
+    if (body.dateMode !== undefined) {
+      if (body.dateMode === 'specific') {
+        if (!body.selectedDates || body.selectedDates.length === 0) {
+          return badRequest('Select at least one date')
+        }
+        const sorted = [...body.selectedDates].sort()
+        pushField('date_mode', 'specific')
+        pushField('date_range_start', sorted[0])
+        pushField('date_range_end', sorted[sorted.length - 1])
+        updates.push('selected_dates = ?')
+        args.push(JSON.stringify(sorted))
+        newValidDates = sorted
+      } else {
+        if (!body.dateRangeStart || !body.dateRangeEnd) {
+          return badRequest('Missing date range')
+        }
+        if (body.dateRangeEnd < body.dateRangeStart) {
+          return badRequest('End date is before start date')
+        }
+        pushField('date_mode', 'range')
+        pushField('date_range_start', body.dateRangeStart)
+        pushField('date_range_end', body.dateRangeEnd)
+        updates.push('selected_dates = ?')
+        args.push(null)
+        newValidDates = expandDateRange(body.dateRangeStart, body.dateRangeEnd)
+      }
+    }
+
     if (updates.length === 0) return badRequest('No fields to update')
 
     updates.push(`updated_at = datetime('now')`)
     args.push(id)
 
-    await db.execute({
-      sql: `UPDATE hangs SET ${updates.join(', ')} WHERE id = ?`,
-      args,
-    })
+    // Apply the hang update, then prune availability for any now-orphaned dates.
+    const writes: { sql: string; args: (string | number | null)[] }[] = [
+      { sql: `UPDATE hangs SET ${updates.join(', ')} WHERE id = ?`, args },
+    ]
+    if (newValidDates !== null) {
+      const placeholders = newValidDates.map(() => '?').join(', ')
+      writes.push({
+        sql: `DELETE FROM availability WHERE hang_id = ? AND date NOT IN (${placeholders})`,
+        args: [id, ...newValidDates],
+      })
+    }
+    await db.batch(writes, 'write')
 
     return NextResponse.json({ success: true })
   } catch (e) {

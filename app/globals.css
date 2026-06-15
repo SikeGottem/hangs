@@ -11,39 +11,44 @@
   --surface-hover: #EDEAE3;
 
   /* Text */
-  --text-primary: #1A1A1A;
+  --text: #1A1A1A;
+  --text-primary: #1A1A1A;        /* alias → --text */
   --text-secondary: #6B6B6B;
-  --text-muted: #A3A3A3;
+  --text-muted: #767676;          /* darkened from #A3A3A3 — passes WCAG AA at 9-12px */
 
-  /* Accent — one yellow, used sparingly */
+  /* Accent — ONE yellow, used sparingly. Reserve for the single next action. */
   --accent: #F5C842;
   --accent-hover: #E5B832;
   --accent-text: #1A1A1A;
 
-  /* Availability states — the most visible colours */
+  /* Availability states */
   --free: #34C26A;
   --free-light: #E8F8EE;
+  --free-text: #1a7a3a;           /* on-light text colour for free state */
   --maybe: #F5C842;
   --maybe-light: #FEF7E0;
+  --maybe-text: #8a6d10;          /* on-light text colour for maybe state */
   --busy: #E8E3D9;
 
   /* Semantic */
   --success: #34C26A;
   --warning: #F5C842;
   --error: #E05252;
+  --error-hover: #C84444;         /* slightly darker --error for hover states */
   --celebrate: #FF6B2B;
 
   /* Borders */
   --border: #E8E3D9;
   --border-light: #F0EDE6;
 
-  /* Typography */
-  --font-display: 'Plus Jakarta Sans', sans-serif;
+  /* Typography — --font-display injected by next/font at runtime */
   --font-body: 'Inter', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* Spacing */
+  /* Radii */
+  --radius-xs: 6px;
   --radius-sm: 8px;
+  --radius: 12px;                 /* canonical mid-size; alias for --radius-md */
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 20px;
@@ -221,11 +226,25 @@ a:focus-visible,
   border: 1px solid var(--border-light);
   cursor: pointer;
   transition: all 0.1s ease;
+  position: relative;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 .grid-cell:active { transform: scale(0.92); }
 .grid-cell-free { background: var(--free); border-color: var(--free); }
 .grid-cell-maybe { background: var(--maybe); border-color: var(--maybe); }
 .grid-cell-busy { background: var(--surface-dim); }
+/* Colorblind-safe glyphs. High-opacity so ✓/~/✗ read as real non-colour
+   signals at small sizes — not just a subtle tint overlay. */
+.grid-cell-free::after  { content: '✓'; color: rgba(255,255,255,0.90); }
+.grid-cell-maybe::after { content: '~'; color: rgba(26,26,26,0.90); }
+.grid-cell-busy::after  { content: ''; }
 
 .grid-header {
   font-family: var(--font-mono);
@@ -315,16 +334,16 @@ a:focus-visible,
 }
 
 /* ── STICKY BAR ── */
+/* Solid fill — no glassmorphism (brief explicitly bans backdrop-blur). */
 .sticky-bar {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
-  background: rgba(250, 248, 243, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid var(--border-light);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
   z-index: 100;
   display: flex;
   gap: 10px;
@@ -336,6 +355,13 @@ a:focus-visible,
 }
 .sticky-bar .btn-secondary {
   flex: 1;
+}
+
+/* Pages that mount a fixed sticky-bar need bottom breathing room so the
+   last bit of content isn't hidden behind the floating button on short
+   viewports. Add this class to the outermost scrollable container. */
+.has-sticky-bar {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
 /* ── MOBILE RESPONSIVE ── */
@@ -365,9 +391,10 @@ a:focus-visible,
   }
 
   .grid-cell {
-    width: 42px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     border-radius: 6px;
+    font-size: 13px;
   }
 
   .vote-btn {
@@ -422,5 +449,60 @@ a:focus-visible,
 }
 .grid-scroll-container::-webkit-scrollbar {
   display: none;
+}
+
+/* ── SKELETON LOADERS ──
+   Shown while a first-paint fetch is in flight (e.g. /state on the results
+   page, /api/hangs on the landing). Keeps the layout from flashing blank. */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-dim) 0%,
+    var(--surface-hover) 40%,
+    var(--surface-dim) 80%
+  );
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; background: var(--surface-dim); }
+}
+
+/* ── COMMITMENT PILL (big, weighty) ──
+   The three-tier commit is the product's moat. Make it feel like a real
+   decision — tap target well above 44px, scale-down on press, bold ring
+   on the selected state so the chosen answer feels locked in. */
+.commit-pill {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px;
+  min-height: 72px;
+  background: var(--surface);
+  border: 2px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.12s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+  font-family: inherit;
+}
+.commit-pill:hover { background: var(--surface-dim); }
+.commit-pill:active { transform: scale(0.985); }
+.commit-pill-selected {
+  box-shadow: 0 0 0 4px rgba(245, 200, 66, 0.18), var(--shadow-md);
+  transform: translateY(-1px);
+}
+@media (max-width: 480px) {
+  .commit-pill {
+    padding: 18px 18px;
+    min-height: 68px;
+  }
 }
 

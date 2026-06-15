@@ -1,10 +1,13 @@
+// Create-hang wizard. Steps: 0=template, 1=basics, 2=activities, 3=extras, 4=review, 5=done.
+// Supports ?quick=1 for an express one-screen lane (tonight preset, name only).
 "use client"
-import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useRef, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import QRCode from "qrcode"
 import { showToast } from "@/components/Toast"
 import DatePicker, { type DatePickerValue } from "@/components/DatePicker"
+import { format } from "date-fns"
 
 const stepTransition = {
   initial: { opacity: 0, x: 30 },
@@ -66,8 +69,33 @@ const SUGGESTIONS = [
 
 type Activity = { name: string; costEstimate: string }
 
-export default function CreatePage() {
+// Format a Date → YYYY-MM-DD in LOCAL timezone (matches DatePicker's iso()).
+const isoLocal = (d: Date) => format(d, 'yyyy-MM-dd')
+
+// Compute default date range using local timezone to avoid Friday-evening-AEST
+// appearing as Saturday (the UTC bug). Matches DatePicker's local formatter.
+function computeDefaultRange() {
+  const today = new Date()
+  const day = today.getDay() // 0 = Sun, 6 = Sat
+  // Sunday evening: skip ahead to next Friday
+  if (day === 0 && today.getHours() >= 18) {
+    const fri = new Date(today); fri.setDate(today.getDate() + 5)
+    const sun = new Date(today); sun.setDate(today.getDate() + 7)
+    return { start: isoLocal(fri), end: isoLocal(sun) }
+  }
+  // Otherwise: today → next Sunday (gives at least 2 days, up to 7)
+  const daysToSunday = day === 0 ? 7 : 7 - day
+  const end = new Date(today); end.setDate(today.getDate() + daysToSunday)
+  return { start: isoLocal(today), end: isoLocal(end) }
+}
+
+function CreatePageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // ?quick=1: express lane — tonight preset, single screen (name + creator + Create)
+  const isQuick = searchParams.get('quick') === '1'
+
   // Crew context: when ?crewId=... is in the URL, the hang is being planned
   // for a specific saved crew. We fetch the creator's crew display_name so the
   // name field pre-fills, and we pass crewId to POST /api/hangs.
@@ -93,26 +121,13 @@ export default function CreatePage() {
       .then(d => {
         if (d?.myProfile?.displayName) setCreatorName(d.myProfile.displayName)
       })
-      .catch(() => {})
+      .catch(err => console.warn('[hangs] crew prefill failed:', err))
   }, [crewCtx])
+
   const [dateMode, setDateMode] = useState<'range' | 'specific'>('range')
-  // Default the date range to "today → end of weekend" so users don't start
-  // from blank. If it's already Sunday evening, default to "next Fri → Sun".
-  const defaultRange = (() => {
-    const today = new Date()
-    const isoDay = (d: Date) => d.toISOString().split('T')[0]
-    const day = today.getDay() // 0 = Sun, 6 = Sat
-    // Sunday evening: skip ahead to next Friday
-    if (day === 0 && today.getHours() >= 18) {
-      const fri = new Date(today); fri.setDate(today.getDate() + 5)
-      const sun = new Date(today); sun.setDate(today.getDate() + 7)
-      return { start: isoDay(fri), end: isoDay(sun) }
-    }
-    // Otherwise: today → next Sunday (gives at least 2 days, up to 7)
-    const daysToSunday = day === 0 ? 7 : 7 - day
-    const end = new Date(today); end.setDate(today.getDate() + daysToSunday)
-    return { start: isoDay(today), end: isoDay(end) }
-  })()
+  // Default range uses local timezone (not UTC) to avoid off-by-one on
+  // Friday evening AEST (which UTC would call Saturday).
+  const defaultRange = computeDefaultRange()
   const [dateStart, setDateStart] = useState(defaultRange.start)
   const [dateEnd, setDateEnd] = useState(defaultRange.end)
   const [selectedDates, setSelectedDates] = useState<string[]>([])
@@ -121,6 +136,10 @@ export default function CreatePage() {
   const [customCost, setCustomCost] = useState("")
   const [location, setLocation] = useState("")
   const [duration, setDuration] = useState(2)
+  // Default to 'blocks' — the research-backed choice. 80% of hangs land on
+  // "Friday evening" resolution, not "5:30-6:30". Power users can switch to
+  // hourly if they genuinely need per-hour precision.
+  const [timeGranularity, setTimeGranularity] = useState<'blocks' | 'hourly'>('blocks')
   // Phase 2: creator-seeded extras (all optional)
   const [description, setDescription] = useState("")
   const [theme, setTheme] = useState("")
@@ -131,6 +150,9 @@ export default function CreatePage() {
   const [bringListSeed, setBringListSeed] = useState<string[]>([])
   const [newBringItem, setNewBringItem] = useState("")
   const [showAllSuggestions, setShowAllSuggestions] = useState(false)
+  // Extras step defaults to collapsed — description is behind a disclosure.
+  // Everything reads as a genuine one-tap pass-through.
+  const [extrasExpanded, setExtrasExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [shareUrl, setShareUrl] = useState("")
   const [hangId, setHangId] = useState("")
@@ -206,6 +228,7 @@ export default function CreatePage() {
           customQuestion: customQuestion || undefined,
           bringListSeed: bringListSeed.length > 0 ? bringListSeed : undefined,
           crewId: crewCtx?.id,
+          timeGranularity,
         }),
       })
       if (!res.ok) throw new Error(`Create failed: ${res.status}`)
@@ -220,29 +243,69 @@ export default function CreatePage() {
       // Persist the creator's name globally so their next respond flow prefills.
       if (creatorName.trim()) localStorage.setItem('hangs_last_name', creatorName.trim())
       setStep(5)
-
-      // Fire the native share sheet immediately on mobile so the creator goes
-      // from "hang created" → "picking Messenger recipients" in one step, not two.
-      // Skip on desktop (no native share) and if iOS Safari isn't ready yet —
-      // we fire it on a micro-delay so the step 5 confetti has a chance to land.
-      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-        const url = `${window.location.origin}/h/${data.id}`
-        setTimeout(() => {
-          navigator.share({
-            title: name,
-            text: `help plan ${name}`,
-            url,
-          }).catch(() => {
-            // User cancelled the sheet — that's fine, the Done screen still shows.
-          })
-        }, 400)
-      }
+      // NOTE: navigator.share auto-fire removed intentionally (Task 3).
+      // The Done launchpad shows first with OG preview + explicit share buttons.
+      // The creator taps "Share to group chat" when ready.
     } catch (err) {
       console.warn('[hangs] create failed:', err)
       showToast('Could not create — check your connection and try again', 'error')
     } finally {
       setLoading(false)
     }
+  }
+
+  // Handle quick-lane create: applies "Tonight" preset then calls handleCreate.
+  const handleQuickCreate = async () => {
+    // Ensure tonight dates are set before creating
+    const todayStr = isoLocal(new Date())
+    setDateMode('range')
+    setDateStart(todayStr)
+    setDateEnd(todayStr)
+    // We need to POST with the correct tonight dates, so inline the values here
+    if (loading) return
+    setLoading(true)
+    try {
+      const res = await fetch("/api/hangs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          creatorName,
+          dateMode: 'range',
+          dateRangeStart: todayStr,
+          dateRangeEnd: todayStr,
+          activities,
+          template,
+          duration,
+          crewId: crewCtx?.id,
+          timeGranularity,
+        }),
+      })
+      if (!res.ok) throw new Error(`Create failed: ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setHangId(data.id)
+      setShareUrl(`${window.location.origin}/h/${data.id}`)
+      if (data.creatorId) localStorage.setItem(`hangs_${data.id}`, data.creatorId)
+      if (data.creatorToken) localStorage.setItem(`hangs_token_${data.id}`, data.creatorToken)
+      if (data.creatorId) localStorage.setItem(`hangs_participant_${data.id}`, data.creatorId)
+      if (creatorName.trim()) localStorage.setItem('hangs_last_name', creatorName.trim())
+      setStep(5)
+    } catch (err) {
+      console.warn('[hangs] create failed:', err)
+      showToast('Could not create — check your connection and try again', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Friendly text to paste into Messenger / WhatsApp. The URL itself will
+  // fetch the OG card from /api/hangs/[id]/og so Messenger/WA render the big
+  // preview — all we need here is the lead-in line + the URL.
+  const copyShareText = async () => {
+    const text = `help me plan ${name} — drag when you're free, vote what to do: ${shareUrl}`
+    await navigator.clipboard.writeText(text)
+    showToast('Copied — paste in your group chat', 'success')
   }
 
   const copyLink = async () => {
@@ -257,6 +320,130 @@ export default function CreatePage() {
     }
   }
 
+  // Progress indicator: show "Step N of 5 · Label" — always the non-done steps.
+  // The "name step" (template, step 0) is skipped for crew/edit users who pre-fill.
+  // We only show up to step 4 (review); step 5 (done) hides the bar.
+  const totalSteps = 5 // Template, Basics, Activities, Extras, Review
+  const stepLabels = ['Template', 'Basics', 'Activities', 'Extras', 'Review']
+  // For crew users who skip template (step 0), we start counting from Basics
+  const progressStep = Math.min(step, totalSteps - 1)
+
+  // ── EXPRESS LANE (quick=1) ──────────────────────────────────────────────
+  if (isQuick) {
+    return (
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: '16px 24px 48px' }}>
+        {/* Crew context banner */}
+        {crewCtx && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px',
+            marginBottom: 20,
+            background: 'var(--maybe-light)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+            fontSize: 13,
+          }}>
+            <div>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>For crew</span>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{crewCtx.name}</div>
+            </div>
+            <a href={`/crews/${crewCtx.id}`} style={{ fontSize: 12, color: 'var(--text-secondary)', textDecoration: 'none', fontWeight: 600 }}>
+              Back
+            </a>
+          </div>
+        )}
+
+        {step < 5 && (
+          <AnimatePresence mode="wait">
+            <motion.div key="quick" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div>
+                <span style={{
+                  display: 'inline-block',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-muted)',
+                  marginBottom: 8,
+                }}>Tonight</span>
+                <h2 className="section-title">Quick hang</h2>
+                <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+                  We&apos;ll set it for tonight. Fill in the details later.
+                </p>
+              </div>
+
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 8 }}>What&apos;s the hangout?</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Weekend vibes, Jake&apos;s birthday..."
+                  className="input"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="label" style={{ display: 'block', marginBottom: 8 }}>Your name</label>
+                <input
+                  type="text"
+                  value={creatorName}
+                  onChange={e => setCreatorName(e.target.value)}
+                  placeholder="Ethan"
+                  className="input"
+                />
+              </div>
+
+              <button
+                onClick={handleQuickCreate}
+                disabled={loading || !name || !creatorName}
+                className="btn-primary"
+                style={{ marginTop: 8 }}
+              >
+                {loading ? 'Creating...' : 'Create hang'}
+              </button>
+
+              <a
+                href="/create"
+                style={{
+                  display: 'block',
+                  textAlign: 'center',
+                  fontSize: 13,
+                  color: 'var(--text-muted)',
+                  textDecoration: 'none',
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Set dates + activities instead
+              </a>
+            </motion.div>
+          </AnimatePresence>
+        )}
+
+        {/* Done screen — shared with normal flow */}
+        {step === 5 && (
+          <AnimatePresence mode="wait">
+            <DoneStep
+              hangId={hangId}
+              name={name}
+              shareUrl={shareUrl}
+              qrDataUrl={qrDataUrl}
+              share={share}
+              copyShareText={copyShareText}
+              copyLink={copyLink}
+              onViewResponses={() => router.push(`/h/${hangId}/results`)}
+            />
+          </AnimatePresence>
+        )}
+      </div>
+    )
+  }
+
+  // ── NORMAL FLOW ──────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '16px 24px 48px' }}>
       {/* Crew context banner — shown when planning for a specific saved crew */}
@@ -268,26 +455,48 @@ export default function CreatePage() {
           padding: '10px 14px',
           marginBottom: 20,
           background: 'var(--maybe-light)',
-          border: '1px solid #F5C842',
-          borderRadius: 10,
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
           fontSize: 13,
         }}>
           <div>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>For crew</span>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{crewCtx.name}</div>
           </div>
-          <a href={`/crews/${crewCtx.id}`} style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+          <a href={`/crews/${crewCtx.id}`} style={{ fontSize: 12, color: 'var(--text-secondary)', textDecoration: 'none', fontWeight: 600 }}>
             Back
           </a>
         </div>
       )}
 
-      {/* Progress */}
+      {/* Progress — labelled step text; hidden on Done screen */}
       {step < 5 && (
-        <div className="progress-bar" style={{ marginBottom: 32 }}>
-          {[0,1,2,3,4].map(s => (
-            <div key={s} className={`progress-dot ${s <= step ? 'progress-dot-active' : ''}`} />
-          ))}
+        <div style={{ marginBottom: 28 }}>
+          {/* Dot track — skip dot 0 for crew users who never see the template step */}
+          <div className="progress-bar" style={{ justifyContent: 'flex-start', marginBottom: 8 }}>
+            {stepLabels.map((_, s) => {
+              // Crew users start at step 1 so dot 0 (template) is irrelevant — dim it
+              const isSkipped = crewCtx && s === 0
+              const isActive = s <= progressStep && !isSkipped
+              return (
+                <div
+                  key={s}
+                  className={`progress-dot ${isActive ? 'progress-dot-active' : ''}`}
+                  style={isSkipped ? { opacity: 0.25 } : {}}
+                />
+              )
+            })}
+          </div>
+          <div style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-muted)',
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}>
+            Step {progressStep + 1} of {totalSteps} &middot; {stepLabels[progressStep]}
+          </div>
         </div>
       )}
 
@@ -343,6 +552,35 @@ export default function CreatePage() {
           >
             Start from scratch
           </button>
+
+          {/* Express lane affordance — the single most important UX shortcut */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: 4,
+          }}>
+            <a
+              href="/create?quick=1"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 14,
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                textDecoration: 'none',
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.02em',
+              }}
+            >
+              {/* Lightning bolt SVG — no emoji */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+              Just find a time — quick hang
+            </a>
+          </div>
         </motion.div>
       )}
 
@@ -351,7 +589,7 @@ export default function CreatePage() {
         <motion.div key="step1" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <h2 className="section-title">The basics</h2>
           <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>What's the hangout?</label>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>What&apos;s the hangout?</label>
             <input
               type="text"
               value={name}
@@ -414,6 +652,61 @@ export default function CreatePage() {
               ))}
             </div>
           </div>
+          {/* How precise do we ask responders to be. Blocks is the 80% default;
+              hourly is for power users with real precision requirements. */}
+          <div>
+            <label className="label" style={{ display: 'block', marginBottom: 8 }}>How precise?</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                {
+                  value: 'blocks' as const, title: 'Quick blocks', sub: '4 taps per day',
+                  icon: (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="3" width="7" height="7" rx="1"/>
+                      <rect x="14" y="3" width="7" height="7" rx="1"/>
+                      <rect x="3" y="14" width="7" height="7" rx="1"/>
+                      <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    </svg>
+                  ),
+                },
+                {
+                  value: 'hourly' as const, title: 'Hourly grid', sub: 'The classic drag-paint',
+                  icon: (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9"/>
+                      <polyline points="12 7 12 12 15 14"/>
+                    </svg>
+                  ),
+                },
+              ].map(g => {
+                const selected = timeGranularity === g.value
+                return (
+                  <button
+                    key={g.value}
+                    onClick={() => setTimeGranularity(g.value)}
+                    aria-pressed={selected}
+                    style={{
+                      flex: 1,
+                      padding: '14px 12px',
+                      background: selected ? 'var(--maybe-light)' : 'var(--surface)',
+                      border: `2px solid ${selected ? 'var(--accent)' : 'var(--border-light)'}`,
+                      borderRadius: 'var(--radius-md)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'flex', flexDirection: 'column', gap: 2,
+                      color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    <span style={{ lineHeight: 1, display: 'inline-flex' }}>{g.icon}</span>
+                    <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text-primary)', marginTop: 6 }}>
+                      {g.title}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.sub}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 12 }}>
             <button onClick={() => setStep(0)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
@@ -448,7 +741,13 @@ export default function CreatePage() {
                   onClick={() => toggleActivity(s)}
                   className={`chip ${isActive ? 'chip-active' : ''}`}
                 >
-                  {isActive && <span style={{ marginRight: 4 }}>&#10003;</span>}{s}
+                  {isActive && (
+                    // Checkmark SVG instead of HTML entity
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }} aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  )}
+                  {s}
                 </button>
               )
             })}
@@ -459,7 +758,7 @@ export default function CreatePage() {
                   padding: '10px 18px',
                   fontSize: 14,
                   fontWeight: 600,
-                  color: 'var(--accent)',
+                  color: 'var(--text-secondary)',
                   background: 'none',
                   border: '1px dashed var(--border)',
                   borderRadius: 'var(--radius-md)',
@@ -500,16 +799,17 @@ export default function CreatePage() {
                     borderRadius: 'var(--radius-md)',
                     border: '1px solid var(--border-light)',
                   }}>
-                    <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{act.name}</span>
+                    <span style={{ flex: 1, fontWeight: 600, fontSize: 14, minWidth: 0 }}>{act.name}</span>
                     <input
                       type="text"
                       value={act.costEstimate}
                       onChange={e => updateCost(act.name, e.target.value)}
                       placeholder="$15-20/person"
                       style={{
-                        width: 140,
+                        flex: '0 1 110px',
+                        minWidth: 0,
                         padding: '8px 10px',
-                        fontSize: 13,
+                        fontSize: 16,  // 16px prevents iOS auto-zoom on focus
                         fontFamily: 'var(--font-mono)',
                         background: 'var(--surface-dim)',
                         border: '1px solid var(--border-light)',
@@ -520,6 +820,7 @@ export default function CreatePage() {
                     />
                     <button
                       onClick={() => setActivities(prev => prev.filter(a => a.name !== act.name))}
+                      aria-label={`Remove ${act.name}`}
                       style={{
                         width: 28,
                         height: 28,
@@ -530,10 +831,14 @@ export default function CreatePage() {
                         border: 'none',
                         cursor: 'pointer',
                         color: 'var(--text-muted)',
-                        fontSize: 18,
+                        flexShrink: 0,
                       }}
                     >
-                      &times;
+                      {/* Close icon SVG instead of &times; */}
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
                     </button>
                   </div>
                 ))}
@@ -541,178 +846,276 @@ export default function CreatePage() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <button onClick={() => setStep(1)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
               onClick={() => setStep(3)}
-              disabled={activities.length < 2}
               className="btn-primary"
               style={{ flex: 1 }}
             >
               Next
             </button>
           </div>
+          {/* Skip link — mirrors the Extras step pattern; 0 activities is fine */}
+          <div style={{ textAlign: 'center' }}>
+            <button
+              onClick={() => setStep(3)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 13,
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.04em',
+                padding: '4px 8px',
+              }}
+            >
+              Skip — just find a time
+            </button>
+          </div>
         </motion.div>
       )}
 
       {/* Step 3: Extras (creator-seeded) */}
-      {step === 3 && (
-        <motion.div key="step3" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {step === 3 && (() => {
+        // Count of filled extras — used to surface "3 details added" when
+        // collapsed so the creator can confirm at a glance.
+        const extrasFilled = [
+          description,
+          theme, dressCode, responseDeadline, customQuestion,
+          bringListSeed.length > 0 ? 'x' : '',
+          askDietary ? 'x' : '',
+        ].filter(Boolean).length
+
+        return (
+        <motion.div key="step3" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div>
-            <h2 className="section-title">Set it up</h2>
+            <h2 className="section-title">Add a vibe</h2>
             <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
-              All optional. Skip anything that doesn't fit.
+              Totally optional. Hit Skip to move on.
             </p>
           </div>
 
-          {/* Description / vibe */}
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Description</label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value.slice(0, 300))}
-              placeholder="What's the vibe? (optional)"
-              rows={3}
-              className="input"
-              style={{ resize: 'vertical', fontFamily: 'var(--font-body)' }}
-            />
-            <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-              {description.length}/300
-            </div>
-          </div>
-
-          {/* Theme + dress code */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Theme</label>
-              <input
-                type="text"
-                value={theme}
-                onChange={e => setTheme(e.target.value)}
-                placeholder="e.g. '80s night"
-                maxLength={60}
-                className="input"
-              />
-            </div>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Dress code</label>
-              <input
-                type="text"
-                value={dressCode}
-                onChange={e => setDressCode(e.target.value)}
-                placeholder="e.g. casual"
-                maxLength={60}
-                className="input"
-              />
-            </div>
-          </div>
-
-          {/* Bring list seed */}
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Bring list</label>
-            {bringListSeed.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                {bringListSeed.map((item, i) => (
-                  <div key={i} style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '6px 12px', background: 'var(--accent)', color: 'var(--accent-text)',
-                    borderRadius: 'var(--radius-md)', fontSize: 13, fontWeight: 600,
-                  }}>
-                    {item}
-                    <button
-                      onClick={() => setBringListSeed(prev => prev.filter((_, j) => j !== i))}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--accent-text)', padding: 0, lineHeight: 1 }}
-                    >&times;</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                type="text"
-                value={newBringItem}
-                onChange={e => setNewBringItem(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && newBringItem.trim()) {
-                    setBringListSeed(prev => [...prev, newBringItem.trim()])
-                    setNewBringItem("")
-                  }
-                }}
-                placeholder="Speakers, snacks, drinks..."
-                maxLength={100}
-                className="input"
-                style={{ flex: 1 }}
-              />
-              <button
-                onClick={() => {
-                  if (newBringItem.trim()) {
-                    setBringListSeed(prev => [...prev, newBringItem.trim()])
-                    setNewBringItem("")
-                  }
-                }}
-                className="btn-secondary"
-                style={{ padding: '14px 20px' }}
-              >
-                Add
-              </button>
-            </div>
-          </div>
-
-          {/* Response deadline */}
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Response deadline</label>
-            <input
-              type="date"
-              value={responseDeadline}
-              onChange={e => setResponseDeadline(e.target.value)}
-              className="input"
-            />
-          </div>
-
-          {/* Dietary toggle */}
-          <div>
-            <label style={{
+          {/* Disclosure trigger — one tap unfurls all extras including description */}
+          <button
+            type="button"
+            onClick={() => setExtrasExpanded(v => !v)}
+            aria-expanded={extrasExpanded}
+            style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-md)', cursor: 'pointer',
-            }}>
-              <div>
-                <div className="label" style={{ marginBottom: 2 }}>Ask about dietary restrictions</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Guests pick from a dropdown on response</div>
-              </div>
-              <input
-                type="checkbox"
-                checked={askDietary}
-                onChange={e => setAskDietary(e.target.checked)}
-                style={{ width: 18, height: 18, cursor: 'pointer' }}
-              />
-            </label>
-          </div>
+              width: '100%', padding: '12px 14px',
+              background: 'transparent',
+              border: '1px dashed var(--border)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-body)',
+              fontSize: 14,
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                {extrasExpanded ? 'Hide details' : 'Add vibe details'}
+              </span>
+              {!extrasExpanded && extrasFilled > 0 && (
+                <span style={{
+                  fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+                  background: 'var(--surface-dim)', padding: '2px 8px', borderRadius: 10,
+                }}>
+                  {extrasFilled} added
+                </span>
+              )}
+            </span>
+            <svg
+              width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              aria-hidden="true"
+              style={{
+                transform: extrasExpanded ? 'rotate(180deg)' : 'rotate(0)',
+                transition: 'transform 0.2s ease',
+                color: 'var(--text-muted)',
+                flexShrink: 0,
+              }}
+            >
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
 
-          {/* Custom question */}
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>One thing to ask guests</label>
-            <input
-              type="text"
-              value={customQuestion}
-              onChange={e => setCustomQuestion(e.target.value)}
-              placeholder="e.g. Are you bringing a +1?"
-              maxLength={200}
-              className="input"
-            />
-          </div>
+          <AnimatePresence initial={false}>
+            {extrasExpanded && (
+              <motion.div
+                key="extras-body"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                style={{ overflow: 'hidden' }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 4 }}>
+
+                  {/* Description / vibe */}
+                  <div>
+                    <label className="label" style={{ display: 'block', marginBottom: 8 }}>Description</label>
+                    <textarea
+                      value={description}
+                      onChange={e => setDescription(e.target.value.slice(0, 300))}
+                      placeholder="What's the vibe? (optional)"
+                      rows={3}
+                      className="input"
+                      style={{ resize: 'vertical', fontFamily: 'var(--font-body)' }}
+                    />
+                    <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {description.length}/300
+                    </div>
+                  </div>
+
+                  {/* Theme + dress code */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label className="label" style={{ display: 'block', marginBottom: 8 }}>Theme</label>
+                      <input
+                        type="text"
+                        value={theme}
+                        onChange={e => setTheme(e.target.value)}
+                        placeholder="e.g. '80s night"
+                        maxLength={60}
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label" style={{ display: 'block', marginBottom: 8 }}>Dress code</label>
+                      <input
+                        type="text"
+                        value={dressCode}
+                        onChange={e => setDressCode(e.target.value)}
+                        placeholder="e.g. casual"
+                        maxLength={60}
+                        className="input"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Bring list seed */}
+                  <div>
+                    <label className="label" style={{ display: 'block', marginBottom: 8 }}>Bring list</label>
+                    {bringListSeed.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                        {bringListSeed.map((item, i) => (
+                          <div key={i} style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '6px 12px', background: 'var(--surface-dim)', color: 'var(--text-secondary)',
+                            borderRadius: 'var(--radius-md)', fontSize: 13, fontWeight: 600,
+                          }}>
+                            {item}
+                            <button
+                              onClick={() => setBringListSeed(prev => prev.filter((_, j) => j !== i))}
+                              aria-label={`Remove ${item}`}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)', padding: 0, lineHeight: 1 }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        value={newBringItem}
+                        onChange={e => setNewBringItem(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && newBringItem.trim()) {
+                            setBringListSeed(prev => [...prev, newBringItem.trim()])
+                            setNewBringItem("")
+                          }
+                        }}
+                        placeholder="Speakers, snacks, drinks..."
+                        maxLength={100}
+                        className="input"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (newBringItem.trim()) {
+                            setBringListSeed(prev => [...prev, newBringItem.trim()])
+                            setNewBringItem("")
+                          }
+                        }}
+                        className="btn-secondary"
+                        style={{ padding: '14px 20px' }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Response deadline */}
+                  <div>
+                    <label className="label" style={{ display: 'block', marginBottom: 8 }}>Response deadline</label>
+                    <input
+                      type="date"
+                      value={responseDeadline}
+                      onChange={e => setResponseDeadline(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+
+                  {/* Dietary toggle */}
+                  <div>
+                    <label style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '14px 16px', background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                    }}>
+                      <div>
+                        <div className="label" style={{ marginBottom: 2 }}>Ask about dietary restrictions</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Guests pick from a dropdown on response</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={askDietary}
+                        onChange={e => setAskDietary(e.target.checked)}
+                        style={{ width: 18, height: 18, cursor: 'pointer' }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Custom question */}
+                  <div>
+                    <label className="label" style={{ display: 'block', marginBottom: 8 }}>One thing to ask guests</label>
+                    <input
+                      type="text"
+                      value={customQuestion}
+                      onChange={e => setCustomQuestion(e.target.value)}
+                      placeholder="e.g. Are you bringing a +1?"
+                      maxLength={200}
+                      className="input"
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div style={{ display: 'flex', gap: 12 }}>
             <button onClick={() => setStep(2)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
-            <button onClick={() => setStep(4)} className="btn-primary" style={{ flex: 1 }}>Next</button>
+            {/* Label is always "Skip" or "Continue" based on fill — never "Next" */}
+            <button onClick={() => setStep(4)} className="btn-primary" style={{ flex: 1 }}>
+              {extrasFilled > 0 ? 'Continue' : 'Skip'}
+            </button>
           </div>
         </motion.div>
-      )}
+        )
+      })()}
 
       {/* Step 4: Review */}
       {step === 4 && (
         <motion.div key="step4" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <h2 className="section-title">Ready to share</h2>
+          <h2 className="section-title">Review &amp; create</h2>
           <div className="card" style={{ padding: 24 }}>
             <div className="label">Hangout</div>
             <div style={{
@@ -761,27 +1164,33 @@ export default function CreatePage() {
             )}
 
             <div className="label">Activities ({activities.length})</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-              {activities.map(a => (
-                <div key={a.name} style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '8px 12px',
-                  background: 'var(--surface-dim)',
-                  borderRadius: 'var(--radius-sm)',
-                }}>
-                  <span style={{ fontWeight: 500, fontSize: 14 }}>{a.name}</span>
-                  {a.costEstimate && (
-                    <span style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 12,
-                      color: 'var(--text-muted)',
-                    }}>{a.costEstimate}</span>
-                  )}
-                </div>
-              ))}
-            </div>
+            {activities.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6, marginBottom: 8 }}>
+                None — group will vote on the day
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                {activities.map(a => (
+                  <div key={a.name} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 12px',
+                    background: 'var(--surface-dim)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}>
+                    <span style={{ fontWeight: 500, fontSize: 14 }}>{a.name}</span>
+                    {a.costEstimate && (
+                      <span style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 12,
+                        color: 'var(--text-muted)',
+                      }}>{a.costEstimate}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 12 }}>
@@ -792,88 +1201,245 @@ export default function CreatePage() {
               className="btn-primary"
               style={{ flex: 1 }}
             >
-              {loading ? "Creating..." : "Create Hang"}
+              {loading ? "Creating..." : "Create hang"}
             </button>
           </div>
         </motion.div>
       )}
 
-      {/* Step 5: Done */}
+      {/* Step 5: Done — the launchpad.
+          Most people bounce off a Done screen because they don't know what
+          the thing they're pasting will look like. Show them the real OG
+          card (the image Messenger/WhatsApp will render) so sharing feels
+          inevitable rather than risky. */}
       {step === 5 && (
-        <motion.div key="step5" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24, textAlign: 'center', paddingTop: 24 }}>
-          <div>
-            <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: '50%',
-              background: 'var(--free-light)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--free)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <h2 className="section-title">You're all set!</h2>
-            <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
-              Share this link with your group.
-            </p>
-          </div>
-
-          {/* QR code for in-person sharing */}
-          {qrDataUrl && (
-            <div style={{
-              display: 'flex', justifyContent: 'center', padding: 20,
-              background: 'var(--surface)', border: '1px solid var(--border-light)',
-              borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)',
-            }}>
-              <img src={qrDataUrl} alt="QR code for hang link" width={200} height={200} style={{ display: 'block' }} />
-            </div>
-          )}
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '12px 16px',
-            background: 'var(--surface-dim)',
-            borderRadius: 'var(--radius-md)',
-          }}>
-            <code style={{
-              flex: 1,
-              fontSize: 13,
-              fontFamily: 'var(--font-mono)',
-              color: 'var(--text-secondary)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>{shareUrl}</code>
-            <button onClick={copyLink} className="btn-secondary" style={{ padding: '8px 16px', fontSize: 13 }}>
-              Copy
-            </button>
-          </div>
-
-          <button onClick={share} className="btn-primary">
-            Share with friends
-          </button>
-          <button
-            onClick={() => router.push(`/h/${hangId}/results`)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 14,
-              color: 'var(--text-muted)',
-              fontFamily: 'var(--font-body)',
-            }}
-          >
-            View responses &rarr;
-          </button>
-        </motion.div>
+        <DoneStep
+          hangId={hangId}
+          name={name}
+          shareUrl={shareUrl}
+          qrDataUrl={qrDataUrl}
+          share={share}
+          copyShareText={copyShareText}
+          copyLink={copyLink}
+          onViewResponses={() => router.push(`/h/${hangId}/results`)}
+        />
       )}
       </AnimatePresence>
+
+      {/* Canvas used by QRCode lib — kept off-screen */}
+      <canvas ref={qrCanvasRef} style={{ display: 'none' }} />
     </div>
+  )
+}
+
+// ── DONE STEP (extracted component so it's reused by both quick + normal flows)
+type DoneStepProps = {
+  hangId: string
+  name: string
+  shareUrl: string
+  qrDataUrl: string
+  share: () => void
+  copyShareText: () => void
+  copyLink: () => void
+  onViewResponses: () => void
+}
+
+function DoneStep({ hangId, name, shareUrl, qrDataUrl, share, copyShareText, copyLink, onViewResponses }: DoneStepProps) {
+  const [recoverEmail, setRecoverEmail] = useState("")
+  const [emailState, setEmailState] = useState<'idle' | 'sending' | 'sent'>('idle')
+
+  async function emailMeLink() {
+    const email = recoverEmail.trim()
+    if (!email || emailState === 'sending') return
+    setEmailState('sending')
+    try {
+      const res = await fetch(`/api/hangs/${hangId}/send-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      if (!res.ok) throw new Error('send failed')
+      setEmailState('sent')
+      showToast("Sent — check your inbox", 'success')
+    } catch {
+      setEmailState('idle')
+      showToast("Couldn't send — try copying the link instead", 'error')
+    }
+  }
+
+  return (
+    <motion.div key="step5" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 8 }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          background: 'var(--free-light)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 14px',
+        }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--free)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
+        <h2 className="section-title">Your hang is live</h2>
+        <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+          Here&apos;s how it&apos;ll look in the group chat.
+        </p>
+      </div>
+
+      {/* Link preview card — mocks the visual frame Messenger/iMessage
+          render around a shared URL, with the real OG card inside. Gives
+          creators confidence that the thing they're pasting looks good. */}
+      {hangId && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border-light)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-sm)',
+          overflow: 'hidden',
+        }}>
+          <div style={{ position: 'relative', aspectRatio: '1200 / 630', background: 'var(--surface-dim)' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/hangs/${hangId}/og?v=${hangId}`}
+              alt={`Preview of ${name} link card`}
+              style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+            />
+          </div>
+          <div style={{
+            padding: '10px 14px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 10, borderTop: '1px solid var(--border-light)',
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+                color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase',
+              }}>Link preview</div>
+              <div style={{
+                fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)',
+                marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {shareUrl.replace(/^https?:\/\//, '')}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Primary share actions — the accent button is the ONE yellow element here */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <button onClick={share} className="btn-primary" style={{ padding: '16px 24px', fontSize: 16 }}>
+          Share to group chat
+        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={copyShareText} className="btn-secondary" style={{ flex: 1, fontSize: 13 }}>
+            Copy message
+          </button>
+          <button onClick={copyLink} className="btn-secondary" style={{ flex: 1, fontSize: 13 }}>
+            Copy link
+          </button>
+        </div>
+      </div>
+
+      {/* QR code — secondary channel for when the group is in the same
+          room. Collapsed by default to keep the share moment uncluttered. */}
+      <details style={{
+        borderTop: '1px dashed var(--border)',
+        paddingTop: 16,
+      }}>
+        <summary style={{
+          cursor: 'pointer',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          color: 'var(--text-muted)',
+          listStyle: 'none',
+        }}>
+          In person? Show a QR
+        </summary>
+        {qrDataUrl && (
+          <div style={{
+            display: 'flex', justifyContent: 'center', padding: 20, marginTop: 14,
+            background: 'var(--surface)', border: '1px solid var(--border-light)',
+            borderRadius: 'var(--radius-lg)',
+          }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={qrDataUrl} alt="QR code for hang link" width={200} height={200} style={{ display: 'block' }} />
+          </div>
+        )}
+      </details>
+
+      {/* Recovery: email yourself the link so you can find this hang from any
+          device later — the no-signup safety net for the creator. */}
+      <div style={{ borderTop: '1px dashed var(--border)', paddingTop: 16 }}>
+        {emailState === 'sent' ? (
+          <div style={{ fontSize: 13, color: 'var(--free-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            Link sent — keep that email so you never lose this hang.
+          </div>
+        ) : (
+          <>
+            <label htmlFor="recover-email" style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>
+              Email yourself the link so you can find it later — no account needed.
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                id="recover-email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={recoverEmail}
+                onChange={e => setRecoverEmail(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') emailMeLink() }}
+                placeholder="you@email.com"
+                className="input"
+                style={{ flex: 1, fontSize: 16 }}
+              />
+              <button
+                onClick={emailMeLink}
+                disabled={!recoverEmail.trim() || emailState === 'sending'}
+                className="btn-secondary"
+                style={{ padding: '14px 18px', whiteSpace: 'nowrap', opacity: (!recoverEmail.trim() || emailState === 'sending') ? 0.5 : 1 }}
+              >
+                {emailState === 'sending' ? 'Sending…' : 'Email me'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <button
+        onClick={onViewResponses}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 14,
+          color: 'var(--text-muted)',
+          fontFamily: 'var(--font-body)',
+          padding: 4,
+        }}
+      >
+        View responses &rarr;
+      </button>
+    </motion.div>
+  )
+}
+
+// useSearchParams() must be inside a Suspense boundary for static prerender (Next 16).
+export default function CreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <CreatePageInner />
+    </Suspense>
   )
 }
