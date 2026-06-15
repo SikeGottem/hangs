@@ -211,7 +211,7 @@ const tools = [
   },
   {
     name: 'hangs_edit',
-    description: 'Creator-only: edit name, description, theme, dress code, location, custom question, response deadline, ask-dietary.',
+    description: 'Creator-only: edit name, description, theme, dress code, location, custom question, response deadline, ask-dietary, or dates. To change dates send dateMode plus either dateRangeStart+dateRangeEnd (range) or selectedDates (specific). Adding dates keeps existing availability; removing dates erases availability for those days.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -224,6 +224,10 @@ const tools = [
         customQuestion: { type: 'string' },
         responseDeadline: { type: 'string', description: 'YYYY-MM-DD or empty string to clear' },
         askDietary: { type: 'boolean' },
+        dateMode: { type: 'string', enum: ['range', 'specific'], description: 'Required when changing dates' },
+        dateRangeStart: { type: 'string', description: 'YYYY-MM-DD (range mode)' },
+        dateRangeEnd: { type: 'string', description: 'YYYY-MM-DD (range mode)' },
+        selectedDates: { type: 'array', items: { type: 'string' }, description: 'YYYY-MM-DD[] (specific mode)' },
         token: { type: 'string', description: 'Creator JWT (required)' },
       },
       required: ['id', 'token'],

@@ -4,6 +4,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { showToast } from "@/components/Toast"
 import { showConfirm } from "@/components/ui/ConfirmModal"
 import { formatDeadline } from "@/lib/time"
+import DatePicker, { type DatePickerValue } from "@/components/DatePicker"
 
 // ── Section group component (Miller's Law — chunk into ~3 groups) ──
 function SectionGroup({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -83,6 +84,10 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [editingField, setEditingField] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  // Draft for the Host-controls date editor. null = not touched (mirror the
+  // hang's current dates); set once the creator interacts with the picker.
+  const [dateDraft, setDateDraft] = useState<DatePickerValue | null>(null)
+  const [savingDates, setSavingDates] = useState(false)
   const [showPendingList, setShowPendingList] = useState(false)
   const [newActivityName, setNewActivityName] = useState('')
   const [newActivityCost, setNewActivityCost] = useState('')
@@ -603,6 +608,77 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       fetchState()
     } else {
       showToast('Failed to save change', 'error')
+    }
+  }
+
+  // Save edited dates. Adding dates is non-destructive; removing dates that
+  // already have availability is warned about before we prune those rows.
+  const saveDates = async (draft: DatePickerValue) => {
+    if (savingDates) return
+    const valid =
+      draft.mode === 'specific'
+        ? !!draft.dates && draft.dates.length > 0
+        : !!draft.start && !!draft.end
+    if (!valid) {
+      showToast(draft.mode === 'specific' ? 'Pick at least one date' : 'Pick a start and end date', 'error')
+      return
+    }
+
+    // Old vs new date set — detect removals that would erase availability.
+    const oldDates =
+      hang.date_mode === 'specific' && hang.selected_dates
+        ? (JSON.parse(hang.selected_dates) as string[])
+        : generateDateRange(hang.date_range_start, hang.date_range_end)
+    const newDates =
+      draft.mode === 'specific'
+        ? [...(draft.dates || [])].sort()
+        : generateDateRange(draft.start!, draft.end!)
+    const newSet = new Set(newDates)
+    const oldSet = new Set(oldDates)
+    const removed = oldDates.filter(d => !newSet.has(d))
+    const added = newDates.filter(d => !oldSet.has(d))
+    const availRows: { date: string }[] = data?.availability || []
+    const removedWithAvail = removed.filter(d => availRows.some(a => a.date === d))
+
+    if (removedWithAvail.length > 0) {
+      const ok = await showConfirm({
+        title: 'Remove dates people already filled?',
+        message: `${removedWithAvail.length} date${removedWithAvail.length > 1 ? 's' : ''} already ha${removedWithAvail.length > 1 ? 've' : 's'} availability. Removing them will erase those responses. Added dates are safe.`,
+        confirmLabel: 'Update dates',
+        danger: true,
+      })
+      if (!ok) return
+    }
+
+    setSavingDates(true)
+    const body =
+      draft.mode === 'specific'
+        ? { dateMode: 'specific', selectedDates: newDates }
+        : { dateMode: 'range', dateRangeStart: draft.start, dateRangeEnd: draft.end }
+    const res = await fetch(`/api/hangs/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    })
+    setSavingDates(false)
+    if (!res.ok) {
+      showToast('Failed to update dates', 'error')
+      return
+    }
+    setDateDraft(null)
+    setShowSettings(false)
+    showToast('Dates updated', 'success')
+    await fetchState()
+    // Nudge the host to paint their own availability on the new days — they
+    // just added dates they haven't marked themselves free on yet.
+    if (myPid && (added.length > 0 || !hasFilledAvailability)) {
+      const goFill = await showConfirm({
+        title: added.length > 0 ? 'Add your availability for the new dates?' : 'Add your availability?',
+        message: "You're in this hang too — mark when you're free so the group can lock a time.",
+        confirmLabel: 'Add my availability',
+        cancelLabel: 'Later',
+      })
+      if (goFill) window.location.href = `/h/${id}?edit=${myPid}`
     }
   }
 
@@ -2391,6 +2467,45 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                 className="input"
                 style={{ fontSize: 14 }}
               />
+            </div>
+
+            {/* Dates — add or change when the hang is open */}
+            <div style={{ marginBottom: 16, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
+              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Dates</label>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                Add more days or change the window. Adding dates keeps everyone&apos;s existing availability.
+              </p>
+              <DatePicker
+                value={
+                  dateDraft ?? {
+                    mode: (hang.date_mode === 'specific' ? 'specific' : 'range') as 'range' | 'specific',
+                    start: hang.date_range_start || undefined,
+                    end: hang.date_range_end || undefined,
+                    dates: hang.date_mode === 'specific' && hang.selected_dates ? JSON.parse(hang.selected_dates) : [],
+                  }
+                }
+                onChange={(v: DatePickerValue) => setDateDraft(v)}
+              />
+              {dateDraft && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <button
+                    onClick={() => saveDates(dateDraft)}
+                    disabled={savingDates}
+                    className="btn-primary"
+                    style={{ flex: 1, fontSize: 13, opacity: savingDates ? 0.6 : 1 }}
+                  >
+                    {savingDates ? 'Saving…' : 'Save dates'}
+                  </button>
+                  <button
+                    onClick={() => setDateDraft(null)}
+                    disabled={savingDates}
+                    className="btn-secondary"
+                    style={{ width: 'auto', padding: '0 16px', fontSize: 13 }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Lock/unlock toggle */}

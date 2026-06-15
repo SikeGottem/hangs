@@ -181,7 +181,8 @@ export const CommitmentSchema = z.object({
 })
 
 // ── PATCH /api/hangs/[id] ──  creator-only editable fields
-// Dates are NOT in here — they require a destructive confirmation path.
+// Dates ARE editable: send a full date spec (dateMode + range or selectedDates).
+// The route revalidates the combo and prunes availability for any removed dates.
 export const EditHangSchema = z
   .object({
     name: ShortText(120).optional(),
@@ -192,6 +193,10 @@ export const EditHangSchema = z
     customQuestion: OptionalShortText(200),
     askDietary: z.boolean().optional(),
     responseDeadline: DateStr.optional().or(z.literal('')),
+    dateMode: z.enum(['range', 'specific']).optional(),
+    dateRangeStart: DateStr.optional(),
+    dateRangeEnd: DateStr.optional(),
+    selectedDates: z.array(DateStr).max(31).optional(),
   })
   .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
 
