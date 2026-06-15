@@ -32,7 +32,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!hang) return notFound()
 
     const hangCrewId = hang.crew_id as string | null
-    const userClaims = hangCrewId ? await requireUser(req) : null
+    // Resolve the session for ANY hang (not just crew hangs) so a logged-in
+    // guest's participant row links to their account → shows in cross-device history.
+    const userClaims = await requireUser(req)
 
     // ── Path 1: crew member auto-join ──
     if (hangCrewId && userClaims) {

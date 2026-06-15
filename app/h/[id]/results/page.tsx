@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useRef, use } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { showToast } from "@/components/Toast"
 import { showConfirm } from "@/components/ui/ConfirmModal"
 import { formatDeadline } from "@/lib/time"
@@ -41,6 +42,8 @@ function formatDay(d: string) {
 
 export default function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [data, setData] = useState<any>(null)
   const [comments, setComments] = useState<any[]>([])
   const [weather, setWeather] = useState<any>(null)
@@ -176,6 +179,32 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     }
   }, [id])
 
+  // "Just created" onboarding: when the creator arrives from the Repeat flow
+  // (or the create wizard), auto-share the link. Native share sheet on mobile
+  // pops Messenger / iMessage / WhatsApp; desktop falls back to clipboard copy.
+  // Runs once per mount — cleans up the query param so refreshes don't re-fire.
+  useEffect(() => {
+    if (!searchParams.get('justCreated')) return
+    const url = `${window.location.origin}/h/${id}`
+    const prompt = async () => {
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+          await navigator.share({ title: 'New hang', text: 'Help pick a time:', url })
+        } else {
+          await navigator.clipboard.writeText(url)
+          showToast('Link copied — paste it in your group chat', 'success')
+        }
+      } catch {
+        // User cancelled — still copy for convenience
+        try { await navigator.clipboard.writeText(url) } catch {}
+      }
+    }
+    prompt()
+    // Strip the query param so a refresh doesn't re-trigger the share sheet
+    router.replace(`/h/${id}/results`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
   if (!data) return (
     <div style={{ maxWidth: 640, margin: '0 auto', padding: '16px 20px 48px' }}>
       <style>{`
@@ -249,26 +278,6 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const rainWarning = weather && weather.precipChance > 40 && sortedActivities.some((a: any) => isOutdoor(a.name))
 
   // ── Actions ──
-  const voteConfirm = async (vote: string) => {
-    if (!synthesis || !myPid) return
-    const res = await fetch(`/api/hangs/${id}/confirm`, {
-      method: "POST", headers: authHeaders(),
-      body: JSON.stringify({
-        participantId: myPid,
-        vote,
-        date: synthesis.recommendedTime.date,
-        hour: synthesis.recommendedTime.hour,
-        activityName: synthesis.recommendedActivity?.name || "",
-      }),
-    })
-    const result = await res.json()
-    if (result.status === 'confirmed') {
-      setShowConfetti(true)
-      setTimeout(() => setShowConfetti(false), 3000)
-    }
-    fetchAll()
-  }
-
   const postComment = async () => {
     if (!newComment.trim() || !myPid) return
     await fetch(`/api/hangs/${id}/comments`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ participantId: myPid, text: newComment }) })
@@ -276,11 +285,34 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     fetch(`/api/hangs/${id}/comments`).then(r => r.json()).then(setComments)
   }
 
-  const nudge = () => {
+  // Build a richer nudge than the one-liner — include progress and the deadline
+  // so responders understand urgency without having to tap the link first.
+  // We don't send messages for the creator; we just hand them a loaded sentence
+  // to paste back into the group chat where the original link was shared.
+  const nudge = async () => {
     const names = missing.map((p: any) => p.name).join(', ')
-    navigator.clipboard.writeText(`Hey ${names}! We're planning "${hang.name}" — fill in your availability: ${window.location.origin}/h/${id}`)
-    setNudgeCopied(true)
-    setTimeout(() => setNudgeCopied(false), 2000)
+    const url = `${window.location.origin}/h/${id}`
+    const lines = [`⏳ Still need ${names || 'a few more people'} for "${hang.name}"`]
+    if (participants.length > 0) {
+      lines.push(`${responded.length}/${participants.length} have replied`)
+    }
+    const deadline = formatDeadline(hang.response_deadline)
+    if (deadline && !deadline.closed) {
+      lines.push(`Closes ${deadline.text}`)
+    }
+    lines.push(url)
+    const text = lines.join('\n')
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({ title: hang.name, text })
+      } else {
+        await navigator.clipboard.writeText(text)
+      }
+      setNudgeCopied(true)
+      setTimeout(() => setNudgeCopied(false), 2000)
+    } catch {
+      /* user cancelled share sheet — silent */
+    }
   }
 
   // Build a plain-text summary for pasting into Messenger / WhatsApp / iMessage.
@@ -303,11 +335,14 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         const loc = hang.location.startsWith('http') ? hang.location : hang.location
         lines.push(`📍 ${loc.length > 80 ? loc.slice(0, 80) + '…' : loc}`)
       }
-      const byP = commitment?.byParticipant || {}
-      const inNames = participants.filter((p: any) => byP[p.id] === 'in').map((p: any) => p.name)
-      const probablyNames = participants.filter((p: any) => byP[p.id] === 'probably').map((p: any) => p.name)
-      if (inNames.length > 0) lines.push(`✅ In: ${inNames.join(', ')}`)
-      if (probablyNames.length > 0) lines.push(`🤔 Probably: ${probablyNames.join(', ')}`)
+      // Post-lock attendance: source from rsvp table (real commitment), not
+      // commitment table (pre-lock interest). rsvps is the single source of truth.
+      const goingNames = rsvps.filter((r: any) => r.status === 'going').map((r: any) => r.name).filter(Boolean)
+      const maybeNames = rsvps.filter((r: any) => r.status === 'maybe').map((r: any) => r.name).filter(Boolean)
+      const cantNames = rsvps.filter((r: any) => r.status === 'cant').map((r: any) => r.name).filter(Boolean)
+      if (goingNames.length > 0) lines.push(`✅ In: ${goingNames.join(', ')}`)
+      if (maybeNames.length > 0) lines.push(`🤔 Probably: ${maybeNames.join(', ')}`)
+      if (cantNames.length > 0) lines.push(`❌ Can't: ${cantNames.join(', ')}`)
       const claimedBring = bringList.filter((b: any) => b.claimedBy && b.claimedBy.length > 0)
       if (claimedBring.length > 0) {
         const bringStr = claimedBring.slice(0, 5).map((b: any) => `${b.item} (${b.claimedBy.map((c: any) => c.name).join(', ')})`).join(' · ')
@@ -369,7 +404,12 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     fetchAll()
   }
 
+  // iOS Safari silently ignores Blob + a.download — always route to Google Cal there.
+  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent)
+
   const downloadCalendar = async () => {
+    // On iOS, fall back to Google Cal (Blob downloads are blocked by Safari).
+    if (isIOS) { await openGoogleCal(); return }
     const res = await fetch(`/api/hangs/${id}/calendar`)
     const cal = await res.json()
     if (cal.error) return
@@ -615,8 +655,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
   const forceConfirmSlot = async (date: string, hour: number) => {
     const ok = await showConfirm({
-      title: 'Lock this slot in as host?',
-      message: 'This bypasses the majority vote and locks the plan for everyone.',
+      title: 'Lock this time in?',
+      message: 'Everyone gets pinged with the final plan and a link to RSVP. You can undo within 2 hours.',
       confirmLabel: 'Lock it in',
     })
     if (!ok) return
@@ -635,11 +675,39 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     }
   }
 
-  const copyNudgeMessage = () => {
-    const names = missing.map((p: any) => p.name).join(', ')
-    navigator.clipboard.writeText(`Hey ${names}! We're planning "${hang.name}" — fill in your availability: ${window.location.origin}/h/${id}`)
-    setNudgeCopied(true)
-    setTimeout(() => setNudgeCopied(false), 2000)
+  // Alias retained for back-compat with the expanded-pending-list button below.
+  const copyNudgeMessage = nudge
+
+  // "Share this plan" — for the second share moment (results screen).
+  // Produces a clean plain-text summary the creator can screenshot/paste into
+  // a group chat. Falls back to clipboard when native share isn't available.
+  const sharePlan = async () => {
+    if (!synthesis) return
+    const lines: string[] = []
+    lines.push(`📍 ${hang.name}`)
+    lines.push(`🕰  ${synthesis.recommendedTime.display}`)
+    if (synthesis.recommendedActivity?.name) lines.push(`🎯 ${synthesis.recommendedActivity.name}`)
+    if (hang.location) lines.push(`📌 ${hang.location}`)
+    if (commitment) {
+      const parts: string[] = []
+      if (commitment.aggregate.in > 0) parts.push(`${commitment.aggregate.in} in`)
+      if (commitment.aggregate.probably > 0) parts.push(`${commitment.aggregate.probably} probably`)
+      if (commitment.aggregate.cant > 0) parts.push(`${commitment.aggregate.cant} can't`)
+      if (parts.length > 0) lines.push(`👥 ${parts.join(' · ')}`)
+    }
+    lines.push('')
+    lines.push(`${window.location.origin}/h/${id}`)
+    const text = lines.join('\n')
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({ title: hang.name, text })
+      } else {
+        await navigator.clipboard.writeText(text)
+        showToast('Plan copied — paste in your group chat', 'success')
+      }
+    } catch {
+      // User cancelled the share sheet — silent, don't toast
+    }
   }
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -937,20 +1005,102 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               : <><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>
             }
           </svg>
-          {hasFilledAvailability ? 'Edit your availability' : 'Add your availability'}
+          {hasFilledAvailability ? 'Edit my availability' : 'Add your availability'}
         </button>
       )}
 
-      {/* Synthesis card */}
-      {synthesis ? (
+      {/* Synthesis card — the "second share moment".
+          This is what someone screenshots and pastes into the group chat.
+          Treat it like a party invite, not a dashboard card: bigger time,
+          clearer activity line, commitment chips at the top so the social
+          proof is legible at a glance, and a share affordance up front.
+          Guard: only show the populated card when synthesiseFromData returned
+          a non-null result AND someone has actually responded (respondedCount>0).
+          synthesiseFromData already returns null on zero availability rows;
+          this double-guard also catches the edge case where the server omits it. */}
+      {synthesis && synthesis.respondedCount > 0 ? (
         <div className="synthesis-card" style={{ marginBottom: 24 }}>
-          <div className="label" style={{ color: 'var(--accent)', marginBottom: 12 }}>Best time — most people free</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 10, marginBottom: 14, flexWrap: 'wrap',
+          }}>
+            <div className="label" style={{ color: 'var(--accent)', margin: 0 }}>
+              The plan so far
+            </div>
+            <button
+              onClick={sharePlan}
+              aria-label="Share this plan with the group"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 12px',
+                background: 'var(--surface-dim)',
+                border: '1px solid var(--border)',
+                borderRadius: 999,
+                fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                transition: 'background 0.15s ease',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+              Share plan
+            </button>
+          </div>
+          <div style={{
+            fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 800,
+            letterSpacing: '-0.028em', lineHeight: 1.1,
+            color: 'var(--text-primary)',
+          }}>
             {synthesis.recommendedTime.display}
           </div>
           {synthesis.recommendedActivity && (
-            <div style={{ fontSize: 18, color: 'var(--text-secondary)', fontWeight: 600, marginTop: 4 }}>
+            <div style={{
+              fontSize: 19, color: 'var(--text-secondary)', fontWeight: 600,
+              marginTop: 6, letterSpacing: '-0.01em',
+            }}>
               {synthesis.recommendedActivity.name}
+            </div>
+          )}
+          {/* Commitment chips — pulled up high so social proof is visible
+              without scrolling. Previously buried near the Who's-in section. */}
+          {commitment && (commitment.aggregate.in + commitment.aggregate.probably + commitment.aggregate.cant) > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
+              {commitment.aggregate.in > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '4px 10px', borderRadius: 999,
+                  background: 'var(--free-light)', color: '#1a7a3a',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                  {commitment.aggregate.in} in
+                </span>
+              )}
+              {commitment.aggregate.probably > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '4px 10px', borderRadius: 999,
+                  background: 'var(--maybe-light)', color: '#8a6d10',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg>
+                  {commitment.aggregate.probably} probably
+                </span>
+              )}
+              {commitment.aggregate.cant > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '4px 10px', borderRadius: 999,
+                  background: '#fef2f2', color: 'var(--error)',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  {commitment.aggregate.cant} can&apos;t
+                </span>
+              )}
             </div>
           )}
 
@@ -1002,10 +1152,12 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             {' / '}{synthesis.recommendedTime.attendeeCount} of {synthesis.totalParticipants} can make it
           </div>
 
-          {/* Confidence */}
+          {/* Response rate — shows how complete the picture is, not a subjective confidence score */}
           <div style={{ marginTop: 6 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Confidence: </span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: synthesis.confidence === 'high' ? 'var(--success)' : synthesis.confidence === 'medium' ? '#B8940F' : 'var(--text-muted)' }}>{synthesis.confidence}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Response rate: </span>
+            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: synthesis.confidence === 'high' ? 'var(--free)' : synthesis.confidence === 'medium' ? '#B8940F' : 'var(--text-muted)' }}>
+              {synthesis.respondedCount}/{synthesis.totalParticipants}
+            </span>
           </div>
 
           {/* Reactions */}
@@ -1025,94 +1177,246 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             })}
           </div>
 
-          {hang.status !== "confirmed" && (() => {
-            const myVote = confirmVotes?.votes?.find((v: any) => v.name === myParticipant?.name)?.vote
-            const yesCount = confirmVotes?.yesCount || 0
-            const threshold = confirmVotes?.threshold || 1
-            const pct = threshold > 0 ? Math.round((yesCount / threshold) * 100) : 0
-            return (
-              <div style={{ marginTop: 16 }}>
-                {/* Progress bar */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <div style={{ flex: 1, height: 6, background: 'var(--border-light)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: yesCount >= threshold ? 'var(--success)' : 'var(--accent)', borderRadius: 3, transition: 'width 0.3s ease' }} />
+          {/* Creator locks the plan — no more group voting. The person who took
+              the initiative to organise is the decider. This fixes the "second
+              round trip" friction that made the least-engaged friend never
+              return to cast a confirm vote. */}
+          {hang.status !== "confirmed" && !isCancelled && (
+            <div style={{ marginTop: 20 }}>
+              {isCreator ? (
+                <>
+                  {/* One consolidated soft caution — surfaces both low response rate AND low hard-yes
+                      count as a single non-blocking message. Creator always decides. */}
+                  {(() => {
+                    const lowResponse = responded.length > 0 && responded.length < Math.ceil(participants.length / 2)
+                    const hardYes = commitment?.aggregate?.in || 0
+                    const lowCommit = hardYes < 2 && responded.length >= 2
+                    if (!lowResponse && !lowCommit) return null
+                    const parts: string[] = []
+                    if (hardYes < 2 && responded.length >= 2) parts.push(`Only ${hardYes} hard ${hardYes === 1 ? 'yes' : 'yeses'} so far`)
+                    if (lowResponse) parts.push(`${responded.length}/${participants.length} have replied`)
+                    return (
+                      <div style={{
+                        padding: '10px 14px', marginBottom: 10,
+                        background: '#fef7e0', border: '1px solid #f0d878',
+                        borderRadius: 'var(--radius-sm)', fontSize: 12, color: '#8a6d10',
+                        display: 'flex', alignItems: 'flex-start', gap: 8,
+                      }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <span>{parts.join(' · ')} — lock anyway?</span>
+                      </div>
+                    )
+                  })()}
+                  <button
+                    onClick={() => forceConfirmSlot(synthesis.recommendedTime.date, synthesis.recommendedTime.hour)}
+                    className="btn-primary"
+                    style={{ width: '100%', padding: '16px 24px', fontSize: 16, fontWeight: 800 }}
+                  >
+                    Lock this in →
+                  </button>
+                  <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    YOU'RE THE HOST — YOU DECIDE WHEN IT'S LOCKED
                   </div>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {yesCount}/{threshold}
-                  </span>
+                </>
+              ) : (
+                <div style={{
+                  padding: '14px 18px', textAlign: 'center',
+                  background: 'var(--surface-dim)', border: '1px dashed var(--border)',
+                  borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--text-muted)',
+                }}>
+                  Waiting for <strong style={{ color: 'var(--text-primary)' }}>{hang.creator_name}</strong> to lock the plan
+                </div>
+              )}
+            </div>
+          )}
+          {hang.status === "confirmed" && (() => {
+            // Phase 2 of two-phase commitment: pre-lock "commitment" was just
+            // interest. Once the time is locked, participants need to RSVP for
+            // real — this is the weight-bearing decision. Hero prompt if they
+            // haven't RSVP'd yet; compact confirmation if they have.
+            const myName = myParticipant?.name
+            const myRsvp = myName ? rsvps.find((r: any) => r.name === myName)?.status : null
+            const hasRsvp = !!myRsvp
+
+            const undoWindowHours = 2
+            const lockedAt = hang.locked_at ? new Date(hang.locked_at) : null
+            const hoursSinceLock = lockedAt ? (Date.now() - lockedAt.getTime()) / 36e5 : Infinity
+            const canUndo = hoursSinceLock < undoWindowHours
+
+            return (
+              <>
+                {/* ── The locked-plan hero ── */}
+                <div style={{
+                  marginTop: 16,
+                  padding: '18px 20px',
+                  background: 'var(--free-light)',
+                  border: '2px solid var(--success)',
+                  borderRadius: 'var(--radius-md)',
+                }}>
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700,
+                    textTransform: 'uppercase', letterSpacing: '0.08em',
+                    color: 'var(--success)', marginBottom: 6,
+                  }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                    Plan locked in
+                  </div>
+
+                  {!myPid || isCreator ? (
+                    /* Observer / creator — no RSVP prompt. Creator RSVPs via the Planning section. */
+                    <div style={{ fontSize: 14, color: '#1a7a3a', fontWeight: 600 }}>
+                      {isCreator ? "You locked it — now send the link back to the chat." : "Happening."}
+                    </div>
+                  ) : !hasRsvp ? (
+                    /* Phase 2 RSVP prompt — the big moment */
+                    <>
+                      <div style={{
+                        fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22,
+                        color: 'var(--text-primary)', letterSpacing: '-0.01em',
+                        marginBottom: 6,
+                      }}>
+                        You in?
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+                        Lock your RSVP — this one's real now.
+                      </div>
+                      <div role="radiogroup" aria-label="RSVP" style={{ display: 'flex', gap: 8 }}>
+                        {[
+                          {
+                            status: 'going', label: "I'm in",
+                            color: 'var(--success)', bg: '#fff',
+                            icon: (
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="9"/>
+                                <polyline points="8.5 12.5 11 15 16 9"/>
+                              </svg>
+                            ),
+                          },
+                          {
+                            status: 'maybe', label: 'Maybe',
+                            color: '#B8940F', bg: '#fff',
+                            icon: (
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="9"/>
+                                <circle cx="8.5" cy="12" r="0.6" fill="currentColor"/>
+                                <circle cx="12" cy="12" r="0.6" fill="currentColor"/>
+                                <circle cx="15.5" cy="12" r="0.6" fill="currentColor"/>
+                              </svg>
+                            ),
+                          },
+                          {
+                            status: 'cant', label: "Can't",
+                            color: 'var(--error)', bg: '#fff',
+                            icon: (
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="9"/>
+                                <line x1="9" y1="9" x2="15" y2="15"/>
+                                <line x1="15" y1="9" x2="9" y2="15"/>
+                              </svg>
+                            ),
+                          },
+                        ].map(r => (
+                          <button
+                            key={r.status}
+                            role="radio"
+                            aria-checked={false}
+                            onClick={() => {
+                              if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+                                try { navigator.vibrate(12) } catch {}
+                              }
+                              submitRsvp(r.status)
+                            }}
+                            style={{
+                              flex: 1, padding: '12px 8px',
+                              background: r.bg, border: `2px solid var(--border-light)`,
+                              borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                              fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14,
+                              color: 'var(--text-primary)',
+                              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                              transition: 'all 0.15s ease',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = r.color; e.currentTarget.style.transform = 'translateY(-1px)' }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-light)'; e.currentTarget.style.transform = 'translateY(0)' }}
+                          >
+                            <span style={{ lineHeight: 1, display: 'inline-flex', color: r.color }}>{r.icon}</span>
+                            <span>{r.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    /* Already RSVP'd — compact confirmation */
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 600 }}>
+                        You're {myRsvp === 'going' ? <strong style={{ color: 'var(--success)' }}>in</strong> : myRsvp === 'maybe' ? <strong style={{ color: '#B8940F' }}>maybe</strong> : <strong style={{ color: 'var(--error)' }}>out</strong>}
+                      </div>
+                      <button
+                        onClick={() => document.getElementById('rsvp-change')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                        style={{
+                          fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+                          background: 'none', border: 'none', textDecoration: 'underline',
+                          cursor: 'pointer', padding: 0,
+                        }}
+                      >
+                        change
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {/* Vote buttons */}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={() => voteConfirm('yes')}
-                    className={myVote === 'yes' ? 'btn-primary' : 'btn-secondary'}
-                    style={{ flex: 1 }}
-                  >
-                    {myVote === 'yes' ? 'Voted yes' : 'Lock it in'}
+                {/* ── Calendar export — post-decision, secondary ──
+                    iOS Safari ignores Blob + a.download; downloadCalendar detects
+                    isIOS and falls through to openGoogleCal automatically.
+                    On non-iOS, show both options; on iOS show only Google Cal. */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  {!isIOS && (
+                    <button onClick={downloadCalendar} className="btn-secondary" style={{ flex: 1, padding: '10px 12px', fontSize: 13 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        .ics
+                      </span>
+                    </button>
+                  )}
+                  <button onClick={openGoogleCal} className="btn-secondary" style={{ flex: 1, padding: '10px 12px', fontSize: 13 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      Google Cal
+                    </span>
                   </button>
+                </div>
+
+                {/* ── Creator-only undo (2h window after locking) ── */}
+                {isCreator && (
                   <button
-                    onClick={() => voteConfirm('no')}
+                    onClick={async () => {
+                      const ok = await showConfirm({
+                        title: canUndo ? 'Unlock the plan?' : 'Unlock after the undo window?',
+                        message: canUndo
+                          ? "Responses re-open. People who already RSVP'd stay RSVP'd."
+                          : `It's been over ${undoWindowHours}h since you locked. Unlocking will notify everyone and re-open responses.`,
+                        confirmLabel: 'Unlock',
+                      })
+                      if (!ok) return
+                      await fetch(`/api/hangs/${id}/confirm`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'unconfirm' }) })
+                      fetchAll()
+                    }}
                     style={{
-                      flex: 'none', padding: '14px 20px',
-                      background: myVote === 'no' ? '#fef2f2' : 'transparent',
-                      border: `1px solid ${myVote === 'no' ? 'var(--error)' : 'var(--border)'}`,
-                      borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                      fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-display)',
-                      color: myVote === 'no' ? 'var(--error)' : 'var(--text-muted)',
+                      marginTop: 8, width: '100%', padding: 8, textAlign: 'center',
+                      fontSize: 12, color: canUndo ? 'var(--text-muted)' : 'var(--text-muted)',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontFamily: 'var(--font-body)',
                     }}
                   >
-                    Not sure
+                    {canUndo ? `Undo lock (${Math.max(0, undoWindowHours - Math.floor(hoursSinceLock))}h left)` : 'Unlock plan'}
                   </button>
-                </div>
-
-                {/* Who's voted */}
-                {confirmVotes?.votes?.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-                    {confirmVotes.votes.map((v: any, i: number) => (
-                      <span key={i} style={{
-                        fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 600,
-                        background: v.vote === 'yes' ? 'var(--free-light)' : '#fef2f2',
-                        color: v.vote === 'yes' ? '#1a7a3a' : 'var(--error)',
-                      }}>
-                        {v.name}
-                      </span>
-                    ))}
-                  </div>
                 )}
-              </div>
+              </>
             )
           })()}
-          {hang.status === "confirmed" && (
-            <>
-              <div style={{ marginTop: 16, padding: 12, textAlign: 'center', fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--success)', background: 'var(--free-light)', borderRadius: 'var(--radius-md)' }}>
-                Plan confirmed!
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button onClick={downloadCalendar} className="btn-secondary" style={{ flex: 1, padding: '10px 12px', fontSize: 13 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    .ics
-                  </span>
-                </button>
-                <button onClick={openGoogleCal} className="btn-secondary" style={{ flex: 1, padding: '10px 12px', fontSize: 13 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                    Google Cal
-                  </span>
-                </button>
-              </div>
-              <button
-                onClick={async () => {
-                  await fetch(`/api/hangs/${id}/confirm`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ action: 'unconfirm' }) })
-                  fetchAll()
-                }}
-                style={{ marginTop: 8, width: '100%', padding: 8, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
-              >
-                Unconfirm plan
-              </button>
-            </>
-          )}
         </div>
       ) : (
         <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 24 }}>
@@ -1120,8 +1424,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* ════════════ PLANNING ════════════ */}
-      <SectionGroup title="Planning" defaultOpen={true}>
+      {/* ════════════ PLANNING ════════════
+          Once the time locks, "Planning" becomes historical — alt times,
+          heatmap, who-picked-what. Collapse by default so the post-lock view
+          leads with what matters now: the plan, the RSVP, the bring-list. */}
+      <SectionGroup title="Planning" defaultOpen={hang.status !== 'confirmed'}>
 
       {/* Alternative times */}
       {synthesis?.alternativeTimes?.length > 0 && (
@@ -1143,13 +1450,13 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {/* RSVP (after confirmed) */}
+      {/* Everyone's RSVP — secondary surface, primary is the hero in the synthesis card */}
       {hang.status === 'confirmed' && myPid && (
-        <div className="card" style={{ padding: 16, marginBottom: 24 }}>
-          <div className="label" style={{ marginBottom: 10 }}>Are you coming?</div>
+        <div id="rsvp-change" className="card" style={{ padding: 16, marginBottom: 24 }}>
+          <div className="label" style={{ marginBottom: 10 }}>RSVPs</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: rsvps.length > 0 ? 12 : 0 }}>
             {[
-              { status: 'going', label: 'Definitely', color: 'var(--success)' },
+              { status: 'going', label: "I'm in", color: 'var(--success)' },
               { status: 'maybe', label: 'Maybe', color: '#B8940F' },
               { status: 'cant', label: "Can't make it", color: 'var(--error)' },
             ].map(r => (
@@ -1165,7 +1472,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {rsvps.map((r: any, i: number) => (
                 <span key={i} style={{ fontSize: 12, padding: '3px 8px', borderRadius: 6, background: r.status === 'going' ? 'var(--free-light)' : r.status === 'maybe' ? 'var(--maybe-light)' : '#fef2f2', color: r.status === 'going' ? '#1a7a3a' : r.status === 'maybe' ? '#8a6d10' : 'var(--error)' }}>
-                  {r.name}: {r.status === 'going' ? 'Going' : r.status === 'maybe' ? 'Maybe' : "Can't"}
+                  {r.name}: {r.status === 'going' ? "In" : r.status === 'maybe' ? 'Maybe' : "Can't"}
                 </span>
               ))}
             </div>
@@ -1206,18 +1513,21 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         {commitment && (commitment.aggregate.in + commitment.aggregate.probably + commitment.aggregate.cant) > 0 && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             {commitment.aggregate.in > 0 && (
-              <div style={{ padding: '6px 12px', background: 'var(--free-light)', color: '#1a7a3a', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
-                🔥 {commitment.aggregate.in} in
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', background: 'var(--free-light)', color: '#1a7a3a', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                {commitment.aggregate.in} in
               </div>
             )}
             {commitment.aggregate.probably > 0 && (
-              <div style={{ padding: '6px 12px', background: 'var(--maybe-light)', color: '#8a6d10', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
-                👀 {commitment.aggregate.probably} probably
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', background: 'var(--maybe-light)', color: '#8a6d10', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg>
+                {commitment.aggregate.probably} probably
               </div>
             )}
             {commitment.aggregate.cant > 0 && (
-              <div style={{ padding: '6px 12px', background: '#fef2f2', color: 'var(--error)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
-                😔 {commitment.aggregate.cant} can't
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', background: '#fef2f2', color: 'var(--error)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                {commitment.aggregate.cant} can't
               </div>
             )}
           </div>
@@ -1226,7 +1536,14 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {participants.map((p: any) => {
             const level = commitment?.byParticipant?.[p.id]
-            const levelMark = level === 'in' ? '🔥' : level === 'probably' ? '👀' : level === 'cant' ? '😔' : ''
+            const levelColor = level === 'in' ? 'var(--free)' : level === 'probably' ? '#B8940F' : level === 'cant' ? 'var(--error)' : null
+            const levelIcon = level === 'in' ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            ) : level === 'probably' ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg>
+            ) : level === 'cant' ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            ) : null
             return (
               <div key={p.id} style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
@@ -1238,7 +1555,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   {p.name.charAt(0).toUpperCase()}
                 </div>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
-                {levelMark && <span style={{ fontSize: 14 }} title={level}>{levelMark}</span>}
+                {levelIcon && <span style={{ color: levelColor || 'currentColor', display: 'inline-flex' }} title={level}>{levelIcon}</span>}
                 {p.dietary && <span style={{ fontSize: 10, padding: '2px 6px', background: 'var(--surface-dim)', borderRadius: 4, color: 'var(--text-muted)' }}>{p.dietary}</span>}
                 {!p.hasResponded && <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>pending</span>}
                 {isCreator && p.id !== creatorPid && (
@@ -1257,12 +1574,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           </button>
         )}
 
-        {/* Soft warning on confirm if fewer than 3 "in" commitments */}
-        {commitment && hang.status !== 'confirmed' && commitment.aggregate.in < 3 && responded.length >= 3 && (
-          <div style={{ marginTop: 10, padding: '10px 14px', background: 'var(--maybe-light)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: '#8a6d10', fontWeight: 500 }}>
-            Heads up: only {commitment.aggregate.in} {commitment.aggregate.in === 1 ? 'person is' : 'people are'} a hard yes. You might want to wait for firmer commitments before locking in.
-          </div>
-        )}
+        {/* Duplicate low-commitment warning removed — consolidated into the single
+            caution block directly above the Lock button in the synthesis card. */}
       </div>
 
       {/* Availability heatmap — transposes to rows-as-dates when range > 5 days
@@ -1544,7 +1857,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       </SectionGroup>
 
       {/* ════════════ LOGISTICS ════════════ */}
-      <SectionGroup title="Logistics" defaultOpen={true}>
+      <SectionGroup title={hang.status === 'confirmed' ? 'The details' : 'Logistics'} defaultOpen={true}>
 
       {/* Bring list — supports sub-items + multi-claim */}
       <div className="card" style={{ padding: 20, marginBottom: 24 }}>
@@ -1957,18 +2270,23 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       {synthesis && (
         <div className="sticky-bar">
           {hang.status !== 'confirmed' ? (
-            (() => {
-              const myVote = confirmVotes?.votes?.find((v: any) => v.name === myParticipant?.name)?.vote
-              const yesCount = confirmVotes?.yesCount || 0
-              const threshold = confirmVotes?.threshold || 1
-              return (
-                <button onClick={() => voteConfirm(myVote === 'yes' ? 'no' : 'yes')} className="btn-primary" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <span style={{ position: 'relative', zIndex: 1 }}>
-                    {myVote === 'yes' ? `Voted — ${yesCount}/${threshold}` : `Lock it in (${yesCount}/${threshold})`}
-                  </span>
-                </button>
-              )
-            })()
+            isCreator ? (
+              <button
+                onClick={() => forceConfirmSlot(synthesis.recommendedTime.date, synthesis.recommendedTime.hour)}
+                className="btn-primary"
+                style={{ position: 'relative', overflow: 'hidden' }}
+              >
+                Lock this in →
+              </button>
+            ) : (
+              <button
+                onClick={copySummary}
+                className="btn-secondary"
+                style={{ flex: 1 }}
+              >
+                Copy progress
+              </button>
+            )
           ) : (
             <>
               <button onClick={() => {
@@ -1978,7 +2296,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               }} className="btn-secondary" style={{ flex: 1 }}>
                 Share
               </button>
-              <button onClick={downloadCalendar} className="btn-primary" style={{ flex: 1 }}>
+              {/* Primary CTA: iOS Safari ignores Blob downloads — route to Google Cal instead */}
+              <button onClick={isIOS ? openGoogleCal : downloadCalendar} className="btn-primary" style={{ flex: 1 }}>
                 Add to calendar
               </button>
             </>
@@ -2161,7 +2480,7 @@ function Confetti() {
           top: -20,
           width: 8 + Math.random() * 8,
           height: 8 + Math.random() * 8,
-          background: ['#F5C842', '#34C26A', '#FF6B2B', '#E05252', '#4A90D9'][Math.floor(Math.random() * 5)],
+          background: ['#F5C842', '#34C26A', '#FF6B2B', '#F5C842', '#34C26A'][Math.floor(Math.random() * 5)],
           borderRadius: Math.random() > 0.5 ? '50%' : '2px',
           animation: `confetti-fall ${1.5 + Math.random() * 2}s ease-in forwards`,
           animationDelay: `${Math.random() * 0.5}s`,
@@ -2183,10 +2502,12 @@ type VoteValue = 'up' | 'meh' | 'down'
 // has joined. Tapping an already-selected vote is a no-op; tapping a
 // different one swaps it. Optimistic updates are handled by the caller.
 function VoteButtons({ myVote, onVote }: { myVote: VoteValue | null | undefined; onVote: (v: VoteValue) => void }) {
+  // Use design tokens: free (green), accent (yellow), error (red) for vote states.
+  // Hardcoded fallback hex matches the CSS vars for Framer-Motion/inline-style contexts.
   const options: { v: VoteValue; label: string; bg: string; color: string; border: string }[] = [
-    { v: 'up',   label: 'Keen', bg: '#34C26A', color: '#fff', border: '#2AA359' },
+    { v: 'up',   label: 'Keen', bg: '#34C26A', color: '#fff',    border: '#2AA359' },
     { v: 'meh',  label: 'Meh',  bg: '#F5C842', color: '#1A1A1A', border: '#DAA816' },
-    { v: 'down', label: 'Nah',  bg: '#EF5A5A', color: '#fff', border: '#C94141' },
+    { v: 'down', label: 'Nah',  bg: '#E05252', color: '#fff',    border: '#C04242' },
   ]
   return (
     <div style={{ display: 'flex', gap: 4 }}>

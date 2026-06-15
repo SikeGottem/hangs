@@ -37,17 +37,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const db = getDb()
   await ensureSchema()
 
-  const [hangRes, pRes, actRes] = await db.batch(
+  // rsvpGoingCount: confirmed hangs source attendance from rsvp (real commitment),
+  // not the pre-lock commitment table (interest only).
+  const [hangRes, pRes, actRes, rsvpRes] = await db.batch(
     [
       { sql: 'SELECT * FROM hangs WHERE id = ?', args: [id] },
       { sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [id] },
       { sql: 'SELECT name FROM activities WHERE hang_id = ? ORDER BY id LIMIT 4', args: [id] },
+      { sql: "SELECT COUNT(*) as cnt FROM rsvp WHERE hang_id = ? AND status = 'going'", args: [id] },
     ],
     'read',
   )
   const hang = hangRes.rows[0] as any
   const participantCount = (pRes.rows[0]?.cnt as number) || 0
   const activities = actRes.rows.map(r => r.name as string).filter(Boolean)
+  const rsvpGoingCount = (rsvpRes.rows[0]?.cnt as number) || 0
 
   // Crew branding — when the hang belongs to a saved crew, pull its color + emoji
   // so the OG card feels native to that group.
@@ -217,28 +221,45 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             </div>
           )}
 
-          {/* Activity chips (only when not yet confirmed — gives preview) */}
-          {!isConfirmed && activities.length > 0 && (
+          {/* Activity chips — show for pending (preview) and confirmed (locked activity).
+              In confirmed state show only the first chip, plus "N going" count. */}
+          {activities.length > 0 && (
             <div style={{
               display: 'flex',
+              alignItems: 'center',
               gap: 12,
               marginTop: 8,
             }}>
-              {activities.slice(0, 4).map((a, i) => (
+              {(isConfirmed ? activities.slice(0, 1) : activities.slice(0, 4)).map((a, i) => (
                 <div key={i} style={{
                   display: 'flex',
                   alignItems: 'center',
                   padding: '12px 22px',
                   background: SURFACE,
-                  border: `2px solid ${BORDER}`,
+                  border: `2px solid ${isConfirmed ? FREE_TEXT : BORDER}`,
                   borderRadius: 14,
                   fontSize: 26,
                   fontWeight: 700,
-                  color: TEXT_PRIMARY,
+                  color: isConfirmed ? FREE_TEXT : TEXT_PRIMARY,
                 }}>
                   {a.length > 18 ? a.slice(0, 17) + '…' : a}
                 </div>
               ))}
+              {isConfirmed && rsvpGoingCount > 0 && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '12px 22px',
+                  background: FREE_LIGHT,
+                  border: `2px solid ${FREE_TEXT}`,
+                  borderRadius: 14,
+                  fontSize: 26,
+                  fontWeight: 700,
+                  color: FREE_TEXT,
+                }}>
+                  {rsvpGoingCount} going
+                </div>
+              )}
             </div>
           )}
         </div>

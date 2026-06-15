@@ -1,0 +1,20 @@
+{
+  "name": "hangs-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for driving the Hangs app from an AI assistant",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "hangs-mcp": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "smoke": "node src/smoke.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

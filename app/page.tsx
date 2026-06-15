@@ -1,8 +1,10 @@
 "use client"
 import Link from "next/link"
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { formatDeadline } from "@/lib/time"
+import { showToast } from "@/components/Toast"
 
 // ── Animated grid demo: simulates cells filling in ──
 const DEMO_GRID = { cols: 5, rows: 7 }
@@ -51,8 +53,17 @@ function AnimatedGrid() {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
   const hours = ['9am', '10am', '11am', '12pm', '1pm', '2pm', '3pm']
 
+  // Use min()/clamp() so all 5 day columns + the row-label column fit at 320px
+  // without clipping. At 320px viewport the card has ~272px usable width
+  // (card padding 24px each side), so label=28px + 5×(272-28)/5≈48px per col.
+  // clamp(28px, 7vw, 40px) gracefully scales the cell width across breakpoints.
   return (
-    <div style={{ display: 'inline-grid', gridTemplateColumns: `36px repeat(${DEMO_GRID.cols}, 40px)`, gap: 3 }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: `min(28px, 7vw) repeat(${DEMO_GRID.cols}, minmax(0, 1fr))`,
+      gap: 3,
+      width: '100%',
+    }}>
       <div />
       {days.map(d => (
         <div key={d} style={{ textAlign: 'center', fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 500, padding: '2px 0' }}>{d}</div>
@@ -70,13 +81,13 @@ function AnimatedGrid() {
                 initial={{ scale: 1 }}
                 animate={isFilled ? {
                   scale: [1, 1.15, 1],
+                  // Use literal hex matching the design tokens (Framer Motion needs JS values)
                   backgroundColor: status === 'free' ? '#34C26A' : status === 'maybe' ? '#F5C842' : '#F2EFE8',
                 } : { backgroundColor: '#F2EFE8' }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
                 style={{
-                  width: 40,
-                  height: 32,
-                  borderRadius: 6,
+                  height: 30,
+                  borderRadius: 'var(--radius-xs)',
                   border: `1px solid ${isFilled ? (status === 'free' ? '#34C26A' : status === 'maybe' ? '#F5C842' : '#E8E3D9') : '#E8E3D9'}`,
                 }}
               />
@@ -136,7 +147,7 @@ function AnimatedVotes() {
               border: `1.5px solid ${c ? c.border : '#E8E3D9'}`,
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{a}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{a}</span>
             <AnimatePresence mode="wait">
               {v && (
                 <motion.span
@@ -168,12 +179,91 @@ const fadeUp = {
 }
 
 export default function Home() {
+  const router = useRouter()
   const [myHangs, setMyHangs] = useState<any[]>([])
   const [me, setMe] = useState<{ user: any; crews: any[] } | null>(null)
+  // null = scanning localStorage, number = how many hang IDs we expect to resolve.
+  // When it's null OR we still have outstanding fetches, show a skeleton.
+  const [expectedHangs, setExpectedHangs] = useState<number | null>(null)
+  const [repeatingId, setRepeatingId] = useState<string | null>(null)
+
+  // One-tap clone + redirect. Dates default to today→+7 on the server side.
+  // Target user: the returning creator ("Justin Guo 20/80 rule" — 20% of users
+  // create 80% of hangs). This saves them walking the 5-step wizard every week.
+  const repeatHang = async (hangId: string) => {
+    setRepeatingId(hangId)
+    try {
+      const res = await fetch(`/api/hangs/${hangId}/clone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Clone failed' }))
+        showToast(err.error || 'Could not repeat hang', 'error')
+        setRepeatingId(null)
+        return
+      }
+      const data = await res.json()
+      // Seed the creator state so /results treats them as host on arrival.
+      if (data.id && data.creatorId) {
+        localStorage.setItem(`hangs_${data.id}`, data.creatorId)
+        localStorage.setItem(`hangs_participant_${data.id}`, data.creatorId)
+      }
+      if (data.creatorToken) {
+        localStorage.setItem(`hangs_token_${data.id}`, data.creatorToken)
+      }
+      router.push(`/h/${data.id}/results?justCreated=1`)
+    } catch {
+      showToast('Network error — try again', 'error')
+      setRepeatingId(null)
+    }
+  }
 
   useEffect(() => {
     fetch('/api/me').then(r => r.json()).then(setMe).catch(() => setMe({ user: null, crews: [] }))
   }, [])
+
+  // Cross-device history: a logged-in user's hangs live on the server (linked by
+  // user_id), so they show up even on a device whose localStorage is empty.
+  // Merged in (deduped by id) alongside the localStorage scan below.
+  useEffect(() => {
+    if (!me?.user) return
+    let cancelled = false
+    fetch('/api/me/hangs').then(r => r.json()).then(data => {
+      if (cancelled || !data?.hangs?.length) return
+      const serverItems = data.hangs.map((h: any) => ({
+        id: h.id,
+        name: h.name,
+        status: h.status,
+        participant_count: h.participantCount || 0,
+        created_at: h.createdAt || 0,
+        response_deadline: null,
+        confirmed_date: h.confirmedDate,
+        needsResponse: false,
+        isCreator: h.isCreator,
+      }))
+      // Seed localStorage so links + repeat work on this device going forward.
+      data.hangs.forEach((h: any) => {
+        if (!h.participantId) return
+        localStorage.setItem(`hangs_participant_${h.id}`, h.participantId)
+        if (h.isCreator) localStorage.setItem(`hangs_${h.id}`, h.participantId)
+      })
+      setMyHangs(prev => {
+        const byId = new Map<string, any>(prev.map((x: any) => [x.id, x]))
+        for (const item of serverItems) if (!byId.has(item.id)) byId.set(item.id, item)
+        const merged = [...byId.values()]
+        merged.sort((a: any, b: any) => {
+          if (a.needsResponse !== b.needsResponse) return a.needsResponse ? -1 : 1
+          if (a.status === 'confirmed' && b.status !== 'confirmed') return 1
+          if (b.status === 'confirmed' && a.status !== 'confirmed') return -1
+          return (b.created_at || 0) - (a.created_at || 0)
+        })
+        return merged
+      })
+      setExpectedHangs(prev => Math.max(prev || 0, serverItems.length))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [me])
 
   useEffect(() => {
     // Find hang IDs from localStorage — only show hangs the user is part of.
@@ -191,6 +281,7 @@ export default function Home() {
 
     // Fetch details for each hang
     const unique = [...new Set(ids)]
+    setExpectedHangs(unique.length)
     if (unique.length === 0) return
 
     Promise.all(
@@ -260,10 +351,10 @@ export default function Home() {
             fontWeight: 800,
             letterSpacing: '-0.045em',
             lineHeight: 1.0,
-            color: 'var(--text-primary)',
+            color: 'var(--text)',
             marginBottom: 16,
           }}>
-            Plan with your crew,<br /><span style={{ color: 'var(--accent)' }}>every week.</span>
+            Find when everyone's free.
           </h1>
         </motion.div>
 
@@ -274,82 +365,92 @@ export default function Home() {
           maxWidth: 360,
           marginBottom: 32,
         }}>
-          Dinner club, society, study group. Save your crew once — every future hang takes 10 seconds.
+          One link. No signup. Sort it tonight.
         </motion.p>
 
         <motion.div custom={2} initial="hidden" animate="visible" variants={fadeUp} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%', maxWidth: 320 }}>
+          {/* Primary CTA — always /create, always yellow. No exceptions. */}
+          <Link
+            href="/create"
+            className="btn-primary"
+            style={{ padding: '16px 24px', fontSize: 16, width: '100%', textAlign: 'center' }}
+          >
+            Plan a hang
+          </Link>
+
+          {/* Microcopy — warm lowercase, matching FirstVisitCoach voice */}
+          <p style={{
+            fontSize: 12,
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.01em',
+            margin: '2px 0 4px',
+          }}>
+            free · no signup · works on any phone
+          </p>
+
+          {/* Secondary — crew feature, demoted to a plain text link */}
           {me?.user ? (
-            <>
-              <Link
-                href={me.crews.length > 0 ? '/crews' : '/crews/new'}
-                className="btn-primary"
-                style={{ padding: '16px 24px', fontSize: 16, width: '100%', textAlign: 'center' }}
-              >
-                {me.crews.length > 0 ? `Your crews (${me.crews.length})` : 'Start a crew'}
-              </Link>
-              <Link
-                href="/create"
-                style={{
-                  padding: '14px 24px', fontSize: 15, width: '100%', textAlign: 'center',
-                  border: '1.5px solid var(--border)', borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)', textDecoration: 'none', fontWeight: 600,
-                  background: 'var(--surface)',
-                  boxSizing: 'border-box',
-                }}
-              >
-                Plan a one-off →
-              </Link>
-            </>
+            <Link
+              href={me.crews.length > 0 ? '/crews' : '/crews/new'}
+              style={{
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                textDecoration: 'none',
+                fontWeight: 500,
+                borderBottom: '1px solid var(--border)',
+                paddingBottom: 1,
+              }}
+            >
+              or plan with the same crew every week →
+            </Link>
           ) : (
-            <>
-              <Link
-                href="/login"
-                className="btn-primary"
-                style={{ padding: '16px 24px', fontSize: 16, width: '100%', textAlign: 'center' }}
-              >
-                Start a crew
-              </Link>
-              <Link
-                href="/create"
-                style={{
-                  padding: '14px 24px', fontSize: 15, width: '100%', textAlign: 'center',
-                  border: '1.5px solid var(--border)', borderRadius: 'var(--radius-md)',
-                  color: 'var(--text-primary)', textDecoration: 'none', fontWeight: 600,
-                  background: 'var(--surface)',
-                  boxSizing: 'border-box',
-                }}
-              >
-                Plan a one-off →
-              </Link>
-            </>
+            <Link
+              href="/login"
+              style={{
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                textDecoration: 'none',
+                fontWeight: 500,
+                borderBottom: '1px solid var(--border)',
+                paddingBottom: 1,
+              }}
+            >
+              or plan with the same crew every week →
+            </Link>
           )}
         </motion.div>
       </div>
 
       {/* ── Animated demo section ── */}
+      {/* Outer wrapper: full-width, clips nothing. Cards stack on narrow screens
+          via flex-wrap so both fit at 320px without horizontal scroll. */}
       <motion.div
         custom={3}
         initial="hidden"
         animate="visible"
         variants={fadeUp}
-        className="demo-cards-container"
         style={{
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'flex-start',
-          gap: 16,
+          flexWrap: 'wrap',
+          gap: 12,
           padding: '40px 16px 48px',
           maxWidth: 600,
           margin: '0 auto',
+          boxSizing: 'border-box',
         }}
       >
-        {/* Grid demo */}
+        {/* Grid demo — flex-grows to fill available width */}
         <div style={{
-          padding: '20px 24px 24px',
+          padding: '16px 16px 20px',
           background: 'var(--surface)',
           borderRadius: 'var(--radius-xl)',
           border: '1px solid var(--border-light)',
           boxShadow: 'var(--shadow-md)',
+          flex: '1 1 200px',
+          minWidth: 0,
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12 }}>
             When works
@@ -359,15 +460,15 @@ export default function Home() {
 
         {/* Vote demo */}
         <div style={{
-          padding: '20px 24px 24px',
+          padding: '16px 16px 20px',
           background: 'var(--surface)',
           borderRadius: 'var(--radius-xl)',
           border: '1px solid var(--border-light)',
           boxShadow: 'var(--shadow-md)',
           display: 'flex',
           flexDirection: 'column',
-          flex: 1,
-          minWidth: 200,
+          flex: '1 1 160px',
+          minWidth: 0,
         }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12 }}>
             What to do
@@ -387,9 +488,33 @@ export default function Home() {
           <div className="label" style={{ textAlign: 'center', marginBottom: 24 }}>How crews work</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {[
-              { n: '1', title: 'Save your group', desc: 'Name it, invite members by email.', emoji: '👥' },
-              { n: '2', title: 'Members set it once', desc: 'Dietary, transport, typical availability — answered forever.', emoji: '📝' },
-              { n: '3', title: 'Every hang is 10 seconds', desc: 'Profile auto-fills, “Use my usual” for availability, one tap to confirm.', emoji: '⚡️' },
+              {
+                n: '1', title: 'Save your group', desc: 'Name it, invite members by email.',
+                icon: (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                  </svg>
+                ),
+              },
+              {
+                n: '2', title: 'Members set it once', desc: 'Dietary, transport, typical availability — answered forever.',
+                icon: (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                  </svg>
+                ),
+              },
+              {
+                n: '3', title: 'Every hang is 10 seconds', desc: 'Profile auto-fills, "Use my usual" for availability, one tap to confirm.',
+                icon: (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                ),
+              },
             ].map((s, i) => (
               <motion.div
                 key={i}
@@ -408,14 +533,14 @@ export default function Home() {
                 <div style={{
                   flexShrink: 0,
                   width: 38, height: 38, borderRadius: 10,
-                  background: i === 2 ? 'var(--accent)' : 'var(--surface-dim)',
+                  background: 'var(--surface-dim)',
+                  color: 'var(--text-secondary)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 20,
                 }}>
-                  {s.emoji}
+                  {s.icon}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', marginBottom: 2 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 2 }}>
                     {s.title}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
@@ -432,6 +557,28 @@ export default function Home() {
       </div>
 
       {/* ── Your hangs (only ones you're part of) ── */}
+      {/* Skeleton while we still have outstanding hang fetches — prevents a
+          blank gap between "How crews work" and the footer on slow mobile. */}
+      {expectedHangs !== null && expectedHangs > 0 && myHangs.length === 0 && (
+        <div style={{ padding: '36px 24px' }}>
+          <div style={{ maxWidth: 520, margin: '0 auto' }}>
+            <div className="label" style={{ marginBottom: 16 }}>Your hangs</div>
+            {Array.from({ length: Math.min(expectedHangs, 3) }).map((_, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 0', gap: 12,
+                borderBottom: '1px solid var(--border-light)',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="skeleton" style={{ height: 16, width: `${55 + (i * 10)}%`, marginBottom: 8 }} />
+                  <div className="skeleton" style={{ height: 11, width: 120 }} />
+                </div>
+                <div className="skeleton" style={{ height: 22, width: 72, borderRadius: 6 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {myHangs.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -446,6 +593,12 @@ export default function Home() {
               const deadline = formatDeadline(h.response_deadline)
               // Route new-responders to the fill-in flow; everyone else to results.
               const href = h.needsResponse ? `/h/${h.id}` : `/h/${h.id}/results`
+              // Repeat is available for ANY hang you hosted — the clone always
+              // starts a fresh planning flow with new dates, so there's no
+              // ambiguity even on in-flight hangs. Previously gated to
+              // confirmed/cancelled but most hangs never reach those states.
+              const canRepeat = h.isCreator
+              const isRepeating = repeatingId === h.id
               return (
                 <motion.div
                   key={h.id}
@@ -453,12 +606,16 @@ export default function Home() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.08, duration: 0.3 }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '14px 0',
+                    borderBottom: '1px solid var(--border-light)',
+                  }}
                 >
                   <Link href={href} style={{
+                    flex: 1, minWidth: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '14px 0', textDecoration: 'none', color: 'inherit',
-                    borderBottom: '1px solid var(--border-light)',
-                    gap: 12,
+                    textDecoration: 'none', color: 'inherit', gap: 12,
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -471,10 +628,15 @@ export default function Home() {
                         <span>{h.participant_count} people</span>
                         {deadline && !deadline.closed && (
                           <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 3,
                             fontFamily: 'var(--font-mono)', fontWeight: 700,
                             color: deadline.urgent ? 'var(--error)' : 'var(--text-muted)',
                           }}>
-                            ⏰ {deadline.text}
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <circle cx="12" cy="12" r="10"/>
+                              <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                            {deadline.text}
                           </span>
                         )}
                       </div>
@@ -501,6 +663,49 @@ export default function Home() {
                       </span>
                     )}
                   </Link>
+                  {canRepeat && (
+                    <button
+                      onClick={() => repeatHang(h.id)}
+                      disabled={isRepeating}
+                      aria-label={`Repeat ${h.name}`}
+                      title="Repeat this hang with the same activities and crew"
+                      style={{
+                        padding: '6px 10px',
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: 6,
+                        fontSize: 11, fontWeight: 700,
+                        fontFamily: 'var(--font-mono)',
+                        color: 'var(--text-secondary)',
+                        cursor: isRepeating ? 'wait' : 'pointer',
+                        whiteSpace: 'nowrap',
+                        opacity: isRepeating ? 0.6 : 1,
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        if (isRepeating) return
+                        e.currentTarget.style.borderColor = 'var(--accent)'
+                        e.currentTarget.style.color = 'var(--accent-text, var(--text-primary))'
+                        e.currentTarget.style.background = 'var(--maybe-light)'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = 'var(--border-light)'
+                        e.currentTarget.style.color = 'var(--text-secondary)'
+                        e.currentTarget.style.background = 'var(--surface)'
+                      }}
+                    >
+                      {isRepeating ? '…' : (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <polyline points="1 4 1 10 7 10"/>
+                            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                          </svg>
+                          Repeat
+                        </>
+                      )}
+                    </button>
+                  )}
                 </motion.div>
               )
             })}

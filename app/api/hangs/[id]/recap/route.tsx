@@ -26,16 +26,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const db = getDb()
   await ensureSchema()
 
-  const [hangRes, partRes, commitRes, photoRes] = await db.batch([
+  // wentCount: for confirmed hangs the single source of truth is rsvp.status='going';
+  // the pre-lock commitment table records interest only, not confirmed attendance.
+  const [hangRes, partRes, rsvpRes, photoRes] = await db.batch([
     { sql: 'SELECT * FROM hangs WHERE id = ?', args: [id] },
     { sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [id] },
-    { sql: "SELECT COUNT(*) as cnt FROM commitment WHERE hang_id = ? AND level = 'in'", args: [id] },
+    { sql: "SELECT COUNT(*) as cnt FROM rsvp WHERE hang_id = ? AND status = 'going'", args: [id] },
     { sql: 'SELECT COUNT(*) as cnt FROM photos WHERE hang_id = ?', args: [id] },
   ], 'read')
 
   const hang = hangRes.rows[0] as any
   const totalPeople = (partRes.rows[0]?.cnt as number) || 0
-  const wentCount = (commitRes.rows[0]?.cnt as number) || 0
+  const wentCount = (rsvpRes.rows[0]?.cnt as number) || 0
   const photoCount = (photoRes.rows[0]?.cnt as number) || 0
 
   let crewBrand: { name: string; color: string; emoji: string } | null = null

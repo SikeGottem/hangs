@@ -20,7 +20,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const parentRes = await db.execute({
       sql: `SELECT id, name, creator_name, crew_id, template, location, duration,
-                   description, theme, dress_code, ask_dietary, custom_question, date_mode
+                   description, theme, dress_code, ask_dietary, custom_question, date_mode,
+                   date_range_start, date_range_end, time_granularity, response_deadline
             FROM hangs WHERE id = ?`,
       args: [parentId],
     })
@@ -56,12 +57,69 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const newHangId = genId()
     const newCreatorId = genId()
 
-    // Default dates: today → +7 days
-    const today = new Date()
     const isoDay = (d: Date) => d.toISOString().split('T')[0]
-    const weekOut = new Date(today); weekOut.setDate(today.getDate() + 7)
-    const start = isoDay(today)
-    const end = isoDay(weekOut)
+
+    // Roll specific weekday dates forward by whole weeks rather than forcing
+    // today→+7, so "next Friday" stays a Friday if the parent was a Friday hang.
+    // Strategy: compute the day-of-week spread from the parent's start date,
+    // then find the next occurrence of the same start-day that is in the future.
+    const rollDateForward = (isoDate: string | null): string => {
+      if (!isoDate) {
+        // No parent date — fall back to today
+        return isoDay(new Date())
+      }
+      const base = new Date(isoDate + 'T00:00:00')
+      const now = new Date()
+      now.setHours(0, 0, 0, 0)
+      const dowBase = base.getDay() // 0=Sun … 6=Sat
+      // Walk forward in 7-day steps until the date is strictly in the future.
+      const candidate = new Date(base)
+      while (candidate <= now) {
+        candidate.setDate(candidate.getDate() + 7)
+      }
+      // Sanity: day-of-week must be preserved
+      if (candidate.getDay() !== dowBase) {
+        // Shouldn't happen, but guard against DST edge cases
+        const diff = (dowBase - candidate.getDay() + 7) % 7
+        candidate.setDate(candidate.getDate() + diff)
+      }
+      return isoDay(candidate)
+    }
+
+    const parentStart = parent.date_range_start as string | null
+    const parentEnd = parent.date_range_end as string | null
+
+    const start = rollDateForward(parentStart)
+
+    // Preserve the day-spread from the parent (e.g. a 3-day window stays 3 days).
+    let end: string
+    if (parentStart && parentEnd) {
+      const spreadMs =
+        new Date(parentEnd + 'T00:00:00').getTime() -
+        new Date(parentStart + 'T00:00:00').getTime()
+      const spreadDays = Math.round(spreadMs / 86_400_000)
+      const endDate = new Date(start + 'T00:00:00')
+      endDate.setDate(endDate.getDate() + spreadDays)
+      end = isoDay(endDate)
+    } else {
+      const weekOut = new Date(start + 'T00:00:00')
+      weekOut.setDate(weekOut.getDate() + 7)
+      end = isoDay(weekOut)
+    }
+
+    // Shift response_deadline by the same forward-offset as the start date.
+    let shiftedDeadline: string | null = null
+    const parentDeadlineRaw = parent.response_deadline as string | null
+    if (parentDeadlineRaw && parentStart) {
+      const parentStartMs = new Date(parentStart + 'T00:00:00').getTime()
+      const newStartMs = new Date(start + 'T00:00:00').getTime()
+      const offsetMs = newStartMs - parentStartMs
+      const deadlineDate = new Date(new Date(parentDeadlineRaw).getTime() + offsetMs)
+      shiftedDeadline = isoDay(deadlineDate)
+    }
+
+    // Carry forward time_granularity; treat null/unknown as 'blocks' (80% default).
+    const clonedGranularity = (parent.time_granularity as string | null) || 'blocks'
 
     const cloneName = /^(re:|next|another|round \d+)/i.test(parent.name as string)
       ? parent.name as string
@@ -71,8 +129,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       {
         sql: `INSERT INTO hangs (id, name, creator_name, creator_id, date_range_start, date_range_end,
                 date_mode, template, location, duration, description, theme, dress_code,
-                ask_dietary, custom_question, crew_id, parent_hang_id)
-              VALUES (?, ?, ?, ?, ?, ?, 'range', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                ask_dietary, custom_question, crew_id, parent_hang_id,
+                time_granularity, response_deadline)
+              VALUES (?, ?, ?, ?, ?, ?, 'range', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           newHangId,
           cloneName,
@@ -90,6 +149,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           parent.custom_question || null,
           parent.crew_id || null,
           parentId,
+          clonedGranularity,
+          shiftedDeadline,
         ],
       },
       {

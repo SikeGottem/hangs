@@ -295,6 +295,13 @@ async function _bootstrap() {
     ['hangs', 'custom_question', 'TEXT'],
     ['hangs', 'locked_at', 'TEXT'],
     ['hangs', 'cancelled_at', 'TEXT'],
+    // Granularity of availability collection. 'blocks' = morning/afternoon/
+    // evening/night (4 pills per day). 'hourly' = the per-hour drag grid.
+    // Creators who know their hangs are "Friday evening"-shaped don't need to
+    // make every friend paint a grid; blocks covers the 80% case.
+    // Default changed to 'blocks' — research shows ~80% of hangs are block-shaped.
+    // Null / unknown values should also be treated as 'blocks' by consumers.
+    ['hangs', 'time_granularity', "TEXT DEFAULT 'blocks'"],
     ['activities', 'cost_estimate', 'TEXT'],
     ['bring_list', 'parent_id', 'INTEGER'],
     ['participants', 'dietary', 'TEXT'],
@@ -397,6 +404,9 @@ export function synthesiseFromData(
 ) {
   const totalParticipants = participants.length
   if (totalParticipants === 0) return null
+  // No one has painted yet — fall through to the empty state rather than
+  // rendering a best-time card with a blank headline.
+  if (allAvail.length === 0) return null
 
   const participantMap: Record<string, string> = {}
   for (const p of participants) participantMap[p.id] = p.name

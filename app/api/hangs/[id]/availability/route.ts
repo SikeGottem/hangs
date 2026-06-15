@@ -5,6 +5,7 @@ import { getDb, ensureSchema, getHangState } from '@/lib/db'
 import { requireAuth } from '@/lib/auth'
 import { AvailabilitySchema, parseBody } from '@/lib/schemas'
 import { serverError, badRequest, unauthorized, forbidden, notFound } from '@/lib/errors'
+import { notify } from '@/lib/notifications'
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -58,6 +59,46 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     await db.batch(writes, 'write')
+
+    // Notify the hang creator that a new availability response arrived.
+    // We fire this after the write succeeds so failures here don't block the
+    // participant's submit. Errors are swallowed — notification loss is
+    // preferable to a 500 for the responding user.
+    //
+    // We skip notifying if:
+    //   (a) the creator_id is not set (old hangs without backfill), or
+    //   (b) the submitter IS the creator (creator filling their own grid).
+    //
+    // TODO(pretest): deadline reminder — when response_deadline is within 24h
+    // and <50% have responded, emit a 'response_needed' notification here too.
+    try {
+      const hangMeta = await db.execute({
+        sql: `SELECT h.creator_id, h.name AS hang_name, h.crew_id,
+                     p.name AS participant_name
+              FROM hangs h
+              LEFT JOIN participants p ON p.id = ? AND p.hang_id = h.id
+              WHERE h.id = ?`,
+        args: [auth.sub, id],
+      })
+      const meta = hangMeta.rows[0]
+      const creatorId = meta?.creator_id as string | null
+      const hangName = (meta?.hang_name as string) || 'your hang'
+      const crewId = (meta?.crew_id as string) || null
+      const participantName = (meta?.participant_name as string) || 'Someone'
+
+      if (creatorId && creatorId !== auth.sub) {
+        await notify({
+          userId: creatorId,
+          type: 'response_needed',
+          hangId: id,
+          crewId,
+          text: `${participantName} filled in their availability for "${hangName}"`,
+          url: `/h/${id}`,
+        })
+      }
+    } catch {
+      // Non-fatal — notification delivery failure must never block the response.
+    }
 
     return NextResponse.json({ success: true, count: slots.length })
   } catch (e) {

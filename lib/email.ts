@@ -80,3 +80,53 @@ export async function sendMagicLink(ctx: MagicLinkContext & { origin?: string })
   }
   return { emailed: true, link }
 }
+
+// Emails the creator their own hang link so they can get back to it from any
+// device without keeping the chat message — the no-signup recovery path.
+export type HangLinkContext = {
+  email: string
+  hangId: string
+  hangName: string
+  origin?: string
+}
+
+export async function sendHangLink(ctx: HangLinkContext): Promise<{ emailed: boolean; link: string }> {
+  const base = (ctx.origin || appUrl).replace(/\/$/, '')
+  const hostLink = `${base}/h/${ctx.hangId}`
+  const resultsLink = `${base}/h/${ctx.hangId}/results`
+  const safeName = ctx.hangName || 'your hang'
+
+  const html = `<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:24px;background:#F5F1E8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;">
+    <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:16px;padding:32px;border:1px solid #E8E3D9;">
+      <h1 style="margin:0 0 16px;font-size:24px;color:#1a1a1a;">hangs</h1>
+      <p style="font-size:16px;line-height:1.5;color:#1a1a1a;margin:0 0 8px;">Here's your link to <strong>${safeName}</strong> — keep this email so you can always get back to it.</p>
+      <a href="${resultsLink}" style="display:inline-block;background:#1a1a1a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;margin:16px 0;">See who's coming</a>
+      <p style="font-size:13px;color:#666;margin:8px 0 0;">Share with friends:<br><span style="word-break:break-all;">${hostLink}</span></p>
+      <p style="font-size:12px;color:#999;margin:24px 0 0;">You're getting this because you asked hangs to email you this link.</p>
+    </div>
+  </body>
+</html>`
+
+  const text = `Your link to ${safeName}.\n\nSee who's coming: ${resultsLink}\nShare with friends: ${hostLink}\n\nKeep this email so you can always get back to your hang.`
+
+  if (!resend) {
+    console.log('\n[hangs:email] RESEND_API_KEY not set — hang link for', ctx.email, '→', hostLink, '\n')
+    return { emailed: false, link: hostLink }
+  }
+
+  const { error } = await resend.emails.send({
+    from: `hangs <${fromAddress}>`,
+    to: ctx.email,
+    subject: `Your link to ${safeName}`,
+    html,
+    text,
+  })
+
+  if (error) {
+    console.error('[hangs:email] Resend error:', error)
+    throw new Error('Failed to send email')
+  }
+  return { emailed: true, link: hostLink }
+}
