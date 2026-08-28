@@ -1,10 +1,9 @@
 // Landing page for Hangs: the consumer-facing story, live planning demo, and returning-user launchpad.
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
+import { motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { showToast } from "@/components/Toast"
 import styles from "./home.module.css"
@@ -83,6 +82,49 @@ function HeroAvailability() {
         <span className={styles.decisionStamp}>BEST FIT</span>
         <strong>Thursday, 7pm</strong>
         <span>Everyone can make it</span>
+      </div>
+    </div>
+  )
+}
+
+function HeroProductShowcase() {
+  return (
+    <div className={styles.productFrame} aria-label="Hangs product preview for a Friday dinner">
+      <div className={styles.productBar}>
+        <span className={styles.productDots} aria-hidden="true"><i /><i /><i /></span>
+        <span>FRIDAY DINNER</span>
+        <span className={styles.liveLabel}>LIVE PLAN</span>
+      </div>
+
+      <div className={styles.productTitleRow}>
+        <div>
+          <span className={styles.monoLabel}>YOU’RE INVITED</span>
+          <strong>Friday dinner</strong>
+          <small>Set up by Maya · 5 friends</small>
+        </div>
+        <div className={styles.avatarStack} aria-label="Maya, Eli, Jo, Sam, and you">
+          <span>MA</span><span>EK</span><span>JO</span><span>+2</span>
+        </div>
+      </div>
+
+      <div className={styles.productWorkspace}>
+        <HeroAvailability />
+        <div className={styles.productDecision}>
+          <span className={styles.monoLabel}>STRONGEST PLAN</span>
+          <p>Everyone overlaps here.</p>
+          <h3>Thu 7:00pm</h3>
+          <dl>
+            <div><dt>Activity</dt><dd>Late dinner</dd></div>
+            <div><dt>Headcount</dt><dd>4 in · 1 maybe</dd></div>
+            <div><dt>Waiting on</dt><dd>Sam</dd></div>
+          </dl>
+          <Link href="/create" className={styles.productAction}>Plan one like this <span>↗</span></Link>
+        </div>
+      </div>
+
+      <div className={styles.productFooter}>
+        <span><i /> Responses save as friends answer</span>
+        <strong>NO ACCOUNT NEEDED</strong>
       </div>
     </div>
   )
@@ -200,6 +242,57 @@ function CommitmentDemo() {
           </span>
         </button>
       ))}
+    </div>
+  )
+}
+
+function ActivityVoteDemo() {
+  const [choice, setChoice] = useState("Bowling")
+  const options = [
+    { name: "Bowling", votes: 4 },
+    { name: "Late dinner", votes: 3 },
+    { name: "Karaoke", votes: 2 },
+  ]
+
+  return (
+    <div className={styles.activityWorkspace}>
+      <div className={styles.activityBallot}>
+        <div className={styles.ballotHeader}>
+          <div><span className={styles.votePrompt}>WHAT ARE WE FEELING?</span><strong>Pick what you’d actually do.</strong></div>
+          <span>4 / 5 voted</span>
+        </div>
+        <div role="radiogroup" aria-label="Choose an activity">
+          {options.map((option) => {
+            const selected = choice === option.name
+            return (
+              <button
+                className={`${styles.voteRow} ${selected ? styles.voteRowSelected : ""}`}
+                key={option.name}
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setChoice(option.name)}
+              >
+                <span><i aria-hidden="true" />{option.name}</span>
+                <strong>{option.votes + (selected && option.name !== "Bowling" ? 1 : 0)} keen</strong>
+              </button>
+            )
+          })}
+        </div>
+        <div className={styles.ballotNote}>Your pick: <strong>{choice}</strong> · change it any time before the plan locks.</div>
+      </div>
+
+      <div className={styles.confirmedPreview}>
+        <span className={styles.confirmedTape}>LOCKED IN</span>
+        <div className={styles.confirmedTopline}><span>FRIDAY DINNER</span><span>05 / 06</span></div>
+        <h3>Thursday<br />at 7pm.</h3>
+        <div className={styles.confirmedRule} />
+        <dl>
+          <div><dt>Doing</dt><dd>{choice}</dd></div>
+          <div><dt>Meeting</dt><dd>Central Station</dd></div>
+          <div><dt>Bring</dt><dd>Your appetite</dd></div>
+        </dl>
+        <div className={styles.confirmedPeople}><span>4 in</span><span>1 probably</span></div>
+      </div>
     </div>
   )
 }
@@ -347,18 +440,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className={styles.heroVisual}>
-          <div className={styles.heroPhotoFrame}>
-            <Image
-              src="/hangs/hero-friends.webp"
-              alt="Friends deciding what to do together around an outdoor table"
-              fill
-              priority
-              sizes="(max-width: 767px) 100vw, 52vw"
-            />
-          </div>
-          <HeroAvailability />
-        </div>
+        <div className={styles.heroVisual}><HeroProductShowcase /></div>
       </section>
 
       <section className={styles.promiseStrip} aria-label="Hangs product promise">
@@ -389,26 +471,7 @@ export default function Home() {
           <h2 id="activity-heading">Then pick the thing.</h2>
           <p>Vote on real options while everyone is already there.</p>
         </div>
-        <div className={styles.activityGallery}>
-          <figure className={styles.bowlingFigure}>
-            <Image src="/hangs/bowling-night.webp" alt="Friends bowling together at night" fill sizes="(max-width: 767px) 100vw, 44vw" />
-          </figure>
-          <div className={styles.votePanel}>
-            <span className={styles.votePrompt}>WHAT ARE WE FEELING?</span>
-            <button className={styles.voteRow}>
-              <span>Bowling</span><strong>4 keen</strong>
-            </button>
-            <button className={styles.voteRow}>
-              <span>Late dinner</span><strong>3 keen</strong>
-            </button>
-            <button className={styles.voteRow}>
-              <span>Karaoke</span><strong>2 keen</strong>
-            </button>
-          </div>
-          <figure className={styles.picnicFigure}>
-            <Image src="/hangs/picnic-night.webp" alt="Friends sharing takeaway food beside the water" fill sizes="(max-width: 767px) 100vw, 32vw" />
-          </figure>
-        </div>
+        <ActivityVoteDemo />
       </section>
 
       <section className={styles.commitmentSection} aria-labelledby="commitment-heading">
@@ -450,8 +513,6 @@ export default function Home() {
           <Link href="/privacy">Privacy</Link>
         </nav>
       </footer>
-
-      <AnimatePresence initial={false} />
     </div>
   )
 }

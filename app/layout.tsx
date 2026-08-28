@@ -61,6 +61,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             hangs
           </Link>
           <nav className="site-nav" aria-label="Main navigation">
+            <Link href="/create" className="site-nav-primary">Plan a hang</Link>
+            <Link href="/crews">Crews</Link>
             <Link href="/login">Log in</Link>
           </nav>
         </header>

@@ -1,10 +1,10 @@
 // /api/hangs/[id]/confirm — GET (public summary), POST (token-authenticated).
 // Unconfirm is creator-only; cast-vote is guest-or-creator.
 import { NextResponse } from 'next/server'
-import { getDb, ensureSchema } from '@/lib/db'
+import { getDb, ensureSchema, getHangState } from '@/lib/db'
 import { requireAuth, requireCreator } from '@/lib/auth'
 import { ConfirmSchema, parseBody } from '@/lib/schemas'
-import { serverError, badRequest, unauthorized } from '@/lib/errors'
+import { serverError, badRequest, forbidden, notFound, unauthorized } from '@/lib/errors'
 import { notifyCrewMembers } from '@/lib/notifications'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -53,8 +53,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const db = getDb()
     await ensureSchema()
+    const state = await getHangState(id)
+    if (!state.exists) return notFound('Hang not found')
+    if (state.cancelled) return forbidden('Uncancel the hang before changing its plan')
+    const isUnconfirm = 'action' in body && body.action === 'unconfirm'
+    if (state.status === 'confirmed' && !isUnconfirm) {
+      return forbidden('Unlock the plan before confirming a different time')
+    }
+    const requestedDate = 'date' in body ? body.date : undefined
+    if (requestedDate && !state.validDates.includes(requestedDate)) {
+      return badRequest('Confirmed date must be one of this hang\'s dates')
+    }
+    const requestedActivity = 'activityName' in body ? body.activityName : undefined
+    if (requestedActivity) {
+      const activityRes = await db.execute({
+        sql: 'SELECT id FROM activities WHERE hang_id = ? AND name = ? LIMIT 1',
+        args: [id, requestedActivity],
+      })
+      if (!activityRes.rows[0]) return badRequest('Confirmed activity must belong to this hang')
+    }
 
-    if ('action' in body && body.action === 'unconfirm') {
+    if (isUnconfirm) {
       // Creator-only: reset everything
       const creator = await requireCreator(req, id, raw as { token?: string })
       if (!creator) return unauthorized('Only the creator can unconfirm')
@@ -63,7 +82,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           { sql: 'DELETE FROM confirm_votes WHERE hang_id = ?', args: [id] },
           {
             sql: `UPDATE hangs SET status = 'planning', confirmed_date = NULL, confirmed_hour = NULL,
-                  confirmed_activity = NULL, confirmed_notes = NULL, updated_at = datetime('now') WHERE id = ?`,
+                  confirmed_activity = NULL, confirmed_notes = NULL, locked_at = NULL,
+                  updated_at = datetime('now') WHERE id = ?`,
             args: [id],
           },
         ],
@@ -78,7 +98,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (!creator) return unauthorized('Only the creator can force-confirm')
       await db.execute({
         sql: `UPDATE hangs SET status = 'confirmed', confirmed_date = ?, confirmed_hour = ?,
-              confirmed_activity = ?, updated_at = datetime('now') WHERE id = ?`,
+              confirmed_activity = ?, locked_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
         args: [body.date, body.hour, body.activityName || '', id],
       })
       // Notify crew members if this is a crew hang
@@ -99,12 +119,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     // Cast vote (any authenticated participant)
-    const auth = await requireAuth(req, id, raw as any)
+    const auth = await requireAuth(req, id, raw as { token?: string })
     if (!auth) return unauthorized()
-    const vote = (body as any).vote || 'yes'
-    const date = (body as any).date
-    const hour = (body as any).hour
-    const activityName = (body as any).activityName
+    const voteBody = body as {
+      vote?: 'yes' | 'no'
+      date?: string
+      hour?: number
+      activityName?: string
+    }
+    const vote = voteBody.vote || 'yes'
+    const date = voteBody.date
+    const hour = voteBody.hour
+    const activityName = voteBody.activityName
 
     await db.execute({
       sql: `INSERT INTO confirm_votes (hang_id, participant_id, vote) VALUES (?, ?, ?)
@@ -112,7 +138,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       args: [id, auth.sub, vote],
     })
 
-    // Threshold check and auto-confirm
+    // Votes are advisory. Only the creator may turn a threshold-crossing vote
+    // into the final plan; otherwise the last guest request could choose it.
     const [totalRes, yesRes] = await db.batch(
       [
         { sql: 'SELECT COUNT(*) as cnt FROM participants WHERE hang_id = ?', args: [id] },
@@ -124,10 +151,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const yesCount = (yesRes.rows[0].cnt as number) || 0
     const threshold = Math.ceil(total / 2)
 
-    if (yesCount >= threshold && date && hour != null) {
+    if (auth.role === 'creator' && yesCount >= threshold && date && hour != null) {
       await db.execute({
         sql: `UPDATE hangs SET status = 'confirmed', confirmed_date = ?, confirmed_hour = ?,
-              confirmed_activity = ?, updated_at = datetime('now') WHERE id = ?`,
+              confirmed_activity = ?, locked_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
         args: [date, hour, activityName || '', id],
       })
       // Notify crew if this is a crew hang

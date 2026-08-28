@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import NotificationBell from '@/components/NotificationBell'
+import product from '@/app/product.module.css'
+import styles from './crew.module.css'
 
 type Member = {
   userId: string
@@ -57,6 +59,10 @@ type CrewState = {
   pastHangs: HangRow[]
 }
 
+type InviteResponse = {
+  invited?: { ok: boolean; email: string; devLink?: string }[]
+}
+
 export default function CrewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
@@ -98,10 +104,10 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
         body: JSON.stringify({ emails }),
       })
       if (!res.ok) throw new Error('invite failed')
-      const data = await res.json()
+      const data = await res.json() as InviteResponse
       const links = (data.invited || [])
-        .filter((i: any) => i.ok && i.devLink)
-        .map((i: any) => ({ email: i.email, link: i.devLink }))
+        .filter((i) => i.ok && i.devLink)
+        .map((i) => ({ email: i.email, link: i.devLink! }))
       setInviteText('')
       if (links.length > 0) {
         setInviteDevLinks(links)
@@ -119,66 +125,56 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
   }
 
   if (error) return (
-    <div style={{ maxWidth: 420, margin: '0 auto', padding: '64px 24px', textAlign: 'center' }}>
-      <div style={{ fontSize: 48, marginBottom: 12 }}>·</div>
-      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 800, marginBottom: 8 }}>
+    <div className={`${product.statusPage} ${styles.errorState}`}>
+      <div className={styles.errorMark}>·</div>
+      <h1 className={product.title}>
         {error.includes('404') ? 'Crew not found' : error.includes('403') ? 'Not in this crew' : 'Couldn\'t load'}
       </h1>
-      <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 20 }}>
+      <p>
         {error.includes('404')
           ? 'This crew might have been renamed or deleted.'
           : error.includes('403')
             ? 'Ask an exec for an invite link, or sign in with the right account.'
             : 'Something went wrong — try again in a moment.'}
       </p>
-      <Link href="/crews" className="btn-primary" style={{ padding: '12px 20px', fontSize: 14, display: 'inline-block' }}>
+      <Link href="/crews" className="btn-primary">
         ← All crews
       </Link>
     </div>
   )
-  if (!state) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading…</div>
+  if (!state) return <div className={styles.loading}>Loading crew workspace…</div>
 
   const needsProfile = !state.myProfile?.dietary && !state.myProfile?.transportPreference
 
   return (
-    <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px 20px 48px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Link href="/crews" style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'none' }}>← All crews</Link>
+    <div className={`${product.pageWide} ${styles.workspace}`}>
+      <div className={styles.utilityBar}>
+        <Link href="/crews" className={product.backLink}>← All crews</Link>
         <NotificationBell />
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginTop: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={styles.cover}>
+        <div className={styles.coverWash} style={{ background: state.crew.coverColor || 'var(--maybe-light)' }} />
+        <div className={styles.coverContent}>
+          <div className={styles.crewIdentity}>
             {(state.crew.coverColor || state.crew.coverEmoji) && (
-              <div style={{
-                width: 44, height: 44, borderRadius: 12,
-                background: state.crew.coverColor || 'var(--maybe-light)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 24, flexShrink: 0,
-              }}>
+              <div className={styles.crewMark} style={{ background: state.crew.coverColor || 'var(--maybe-light)' }}>
                 {state.crew.coverEmoji || '·'}
               </div>
             )}
             <div>
-              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 800, letterSpacing: '-0.04em', margin: 0 }}>
+              <span className={styles.crewKicker}>Crew workspace</span>
+              <h1 className={styles.crewTitle}>
                 {state.crew.name}
               </h1>
               {state.crew.description && (
-                <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 4 }}>
+                <div className={styles.crewDescription}>
                   {state.crew.description}
                 </div>
               )}
             </div>
           </div>
-          <Link
-            href={`/crews/${id}/profile`}
-            style={{
-              fontSize: 12, fontWeight: 600, padding: '6px 10px',
-              borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border-light)',
-              textDecoration: 'none', color: 'inherit', whiteSpace: 'nowrap',
-            }}
-          >
+          <Link href={`/crews/${id}/profile`} className={styles.profileLink}>
             Your profile
           </Link>
         </div>
@@ -187,28 +183,20 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
       {needsProfile && (
         <Link
           href={`/crews/${id}/profile`}
-          style={{
-            display: 'block', marginTop: 20, padding: '12px 14px',
-            background: 'var(--maybe-light)', borderRadius: 10,
-            fontSize: 13, color: 'var(--text-primary)', textDecoration: 'none',
-            border: '1px solid #F5C842',
-          }}
+          className={styles.profileNotice}
         >
           <strong>Finish your profile →</strong> add dietary + transport so future hangs auto-fill for you.
         </Link>
       )}
 
-      {/* New hang CTA */}
       <Link
         href={`/create?crewId=${id}&crewName=${encodeURIComponent(state.crew.name)}`}
-        className="btn-primary"
-        style={{ display: 'block', textAlign: 'center', padding: 14, fontSize: 15, marginTop: 20, textDecoration: 'none' }}
+        className={`btn-primary ${styles.planAction}`}
       >
-        + Plan a new hang
+        Plan with this crew <span aria-hidden="true">→</span>
       </Link>
 
-      {/* Stats strip — visible proof the crew has momentum */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 20 }}>
+      <div className={styles.stats} aria-label="Crew activity">
         <StatTile label="This month" value={`${state.stats.hangsThisMonth}`} sub={state.stats.hangsThisMonth === 1 ? 'hang' : 'hangs'} />
         <StatTile
           label="Avg turnout"
@@ -218,10 +206,9 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
         <StatTile label="Your streak" value={`${state.stats.myStreak}`} sub={state.stats.myStreak === 1 ? 'in a row' : 'in a row'} />
       </div>
 
-      {/* Upcoming */}
-      <Section title="Upcoming">
+      <Section title="Upcoming hangs">
         {state.upcomingHangs.length === 0 ? (
-          <Empty>No hangs planned yet. Tap the button above to start one.</Empty>
+          <Empty>No hangs planned yet. Use “Plan with this crew” to start one.</Empty>
         ) : (
           <List>
             {state.upcomingHangs.map(h => <HangItem key={h.id} hang={h} />)}
@@ -229,13 +216,12 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
         )}
       </Section>
 
-      {/* Members */}
       <Section
         title={`Members (${state.members.length})`}
         cta={state.myRole === 'exec' ? (
           <button
             onClick={() => setShowInvite(v => !v)}
-            style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
+            className={styles.inviteToggle}
           >
             {showInvite ? 'Cancel' : '+ Invite'}
           </button>
@@ -305,9 +291,10 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
         </List>
       </Section>
 
-      {/* Recurring schedule (exec-only) */}
       {state.myRole === 'exec' && (
-        <RecurringSection
+        <aside className={styles.execDesk} aria-label="Crew administration">
+          <div className={styles.execDeskHeading}>Crew desk <span>Executive tools</span></div>
+          <RecurringSection
           crewId={id}
           currentRule={state.crew.recurringRule}
           currentTemplateId={state.crew.recurringTemplateHangId}
@@ -316,12 +303,8 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
             const r = await fetch(`/api/crews/${id}/state`)
             if (r.ok) setState(await r.json())
           }}
-        />
-      )}
-
-      {/* Crew branding (exec-only) */}
-      {state.myRole === 'exec' && (
-        <BrandingSection
+          />
+          <BrandingSection
           crewId={id}
           color={state.crew.coverColor}
           emoji={state.crew.coverEmoji}
@@ -329,12 +312,8 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
             const r = await fetch(`/api/crews/${id}/state`)
             if (r.ok) setState(await r.json())
           }}
-        />
-      )}
-
-      {/* Public invite link (exec-only) */}
-      {state.myRole === 'exec' && (
-        <InviteLinkSection
+          />
+          <InviteLinkSection
           crewId={id}
           slug={state.crew.slug}
           token={state.crew.publicInviteToken}
@@ -342,12 +321,12 @@ export default function CrewPage({ params }: { params: Promise<{ id: string }> }
             const r = await fetch(`/api/crews/${id}/state`)
             if (r.ok) setState(await r.json())
           }}
-        />
+          />
+        </aside>
       )}
 
-      {/* Past */}
       {state.pastHangs.length > 0 && (
-        <Section title="Past">
+        <Section title="Past hangs">
           <List>
             {state.pastHangs.slice(0, 10).map(h => (
               <PastHangItem key={h.id} hang={h} onCloned={nid => router.push(`/h/${nid}`)} />

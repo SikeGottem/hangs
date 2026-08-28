@@ -16,7 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Verify creator
     const hangRes = await db.execute({
-      sql: 'SELECT creator_id FROM hangs WHERE id = ?',
+      sql: 'SELECT creator_id, status FROM hangs WHERE id = ?',
       args: [id],
     })
     if (!hangRes.rows[0]) return notFound('Hang not found')
@@ -28,6 +28,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const parsed = parseBody(raw, SettingsSchema)
     if ('error' in parsed) return badRequest(parsed.error)
     const body = parsed.data
+    if (body.action === 'unlock' && hangRes.rows[0].status === 'confirmed') {
+      return badRequest('Unlock the plan before reopening responses')
+    }
 
     switch (body.action) {
       case 'lock':
@@ -50,7 +53,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         break
       case 'uncancel':
         await db.execute({
-          sql: `UPDATE hangs SET cancelled_at = NULL, status = 'planning', updated_at = datetime('now') WHERE id = ?`,
+          sql: `UPDATE hangs SET cancelled_at = NULL,
+                status = CASE WHEN confirmed_date IS NOT NULL THEN 'confirmed' ELSE 'planning' END,
+                updated_at = datetime('now') WHERE id = ?`,
           args: [id],
         })
         break

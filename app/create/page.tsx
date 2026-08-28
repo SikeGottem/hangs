@@ -8,6 +8,7 @@ import QRCode from "qrcode"
 import { showToast } from "@/components/Toast"
 import DatePicker, { type DatePickerValue } from "@/components/DatePicker"
 import { format } from "date-fns"
+import styles from "./create.module.css"
 
 const stepTransition = {
   initial: { opacity: 0, x: 30 },
@@ -166,8 +167,6 @@ function CreatePageInner() {
       .then(setQrDataUrl)
       .catch(err => console.warn('[hangs] QR code generation failed:', err))
   }, [shareUrl])
-
-  const steps = ['Template', 'Basics', 'Activities', 'Extras', 'Review', 'Done']
 
   const selectTemplate = (tpl: typeof TEMPLATES[0] | null) => {
     if (tpl) {
@@ -331,7 +330,7 @@ function CreatePageInner() {
   // ── EXPRESS LANE (quick=1) ──────────────────────────────────────────────
   if (isQuick) {
     return (
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '16px 24px 48px' }}>
+      <div className={`${styles.page} ${styles.quick}`}>
         {/* Crew context banner */}
         {crewCtx && (
           <div style={{
@@ -357,37 +356,27 @@ function CreatePageInner() {
 
         {step < 5 && (
           <AnimatePresence mode="wait">
-            <motion.div key="quick" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <div>
-                <span style={{
-                  display: 'inline-block',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-muted)',
-                  marginBottom: 8,
-                }}>Tonight</span>
+            <motion.div key="quick" {...stepTransition} className={styles.step}>
+              <div className={styles.stepIntro}>
+                <span className={styles.eyebrow}>Tonight</span>
                 <h2 className="section-title">Quick hang</h2>
-                <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+                <p>
                   We&apos;ll set it for tonight. Fill in the details later.
                 </p>
               </div>
 
-              <div>
-                <label className="label" style={{ display: 'block', marginBottom: 8 }}>What&apos;s the hangout?</label>
+              <div className={styles.field}>
+                <label>What&apos;s the hangout?</label>
                 <input
                   type="text"
                   value={name}
                   onChange={e => setName(e.target.value)}
                   placeholder="Weekend vibes, Jake&apos;s birthday..."
                   className="input"
-                  autoFocus
                 />
               </div>
-              <div>
-                <label className="label" style={{ display: 'block', marginBottom: 8 }}>Your name</label>
+              <div className={styles.field}>
+                <label>Your name</label>
                 <input
                   type="text"
                   value={creatorName}
@@ -406,17 +395,9 @@ function CreatePageInner() {
                 {loading ? 'Creating...' : 'Create hang'}
               </button>
 
-              <a
+              <a className={styles.quietLink}
                 href="/create"
-                style={{
-                  display: 'block',
-                  textAlign: 'center',
-                  fontSize: 13,
-                  color: 'var(--text-muted)',
-                  textDecoration: 'none',
-                  fontFamily: 'var(--font-mono)',
-                  letterSpacing: '0.04em',
-                }}
+                style={{ alignSelf: 'center' }}
               >
                 Set dates + activities instead
               </a>
@@ -445,25 +426,15 @@ function CreatePageInner() {
 
   // ── NORMAL FLOW ──────────────────────────────────────────────────────────
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: '16px 24px 48px' }}>
+    <div className={styles.page}>
       {/* Crew context banner — shown when planning for a specific saved crew */}
       {crewCtx && step < 5 && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 14px',
-          marginBottom: 20,
-          background: 'var(--maybe-light)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          fontSize: 13,
-        }}>
+        <div className={styles.crewNote}>
           <div>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>For crew</span>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{crewCtx.name}</div>
           </div>
-          <a href={`/crews/${crewCtx.id}`} style={{ fontSize: 12, color: 'var(--text-secondary)', textDecoration: 'none', fontWeight: 600 }}>
+          <a href={`/crews/${crewCtx.id}`}>
             Back
           </a>
         </div>
@@ -471,31 +442,20 @@ function CreatePageInner() {
 
       {/* Progress — labelled step text; hidden on Done screen */}
       {step < 5 && (
-        <div style={{ marginBottom: 28 }}>
+        <div className={styles.progress}>
           {/* Dot track — skip dot 0 for crew users who never see the template step */}
-          <div className="progress-bar" style={{ justifyContent: 'flex-start', marginBottom: 8 }}>
+          <div className={styles.progressTrack} aria-hidden="true">
             {stepLabels.map((_, s) => {
               // Crew users start at step 1 so dot 0 (template) is irrelevant — dim it
               const isSkipped = crewCtx && s === 0
               const isActive = s <= progressStep && !isSkipped
               return (
-                <div
-                  key={s}
-                  className={`progress-dot ${isActive ? 'progress-dot-active' : ''}`}
-                  style={isSkipped ? { opacity: 0.25 } : {}}
-                />
+                <i key={s} data-active={isActive} style={isSkipped ? { opacity: 0.25 } : {}} />
               )
             })}
           </div>
-          <div style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--text-muted)',
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-          }}>
-            Step {progressStep + 1} of {totalSteps} &middot; {stepLabels[progressStep]}
+          <div className={styles.progressMeta}>
+            <span>Step {progressStep + 1} of {totalSteps}</span><span>{stepLabels[progressStep]}</span>
           </div>
         </div>
       )}
@@ -503,46 +463,25 @@ function CreatePageInner() {
       <AnimatePresence mode="wait">
       {/* Step 0: Template picker */}
       {step === 0 && (
-        <motion.div key="step0" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div>
+        <motion.div key="step0" {...stepTransition} className={styles.step}>
+          <div className={styles.stepIntro}>
+            <span className={styles.eyebrow}>A small plan, well made</span>
             <h2 className="section-title">Start with a template</h2>
-            <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+            <p>
               Or skip and build from scratch.
             </p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className={styles.templateList}>
             {TEMPLATES.map(tpl => (
               <button
                 key={tpl.id}
                 onClick={() => selectTemplate(tpl)}
-                className="card"
-                style={{
-                  padding: '18px 20px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  border: '1px solid var(--border-light)',
-                  background: 'var(--surface)',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = 'var(--accent)'
-                  e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = 'var(--border-light)'
-                  e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
-                }}
+                className={styles.template}
               >
-                <div style={{
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 700,
-                  fontSize: 16,
-                  color: 'var(--text-primary)',
-                  marginBottom: 6,
-                }}>{tpl.name}</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                <strong>{tpl.name}</strong>
+                <span>
                   {tpl.activities.map(a => a.name).join(' / ')}
-                </div>
+                </span>
               </button>
             ))}
           </div>
@@ -586,10 +525,10 @@ function CreatePageInner() {
 
       {/* Step 1: Basics */}
       {step === 1 && (
-        <motion.div key="step1" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <h2 className="section-title">The basics</h2>
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>What&apos;s the hangout?</label>
+        <motion.div key="step1" {...stepTransition} className={styles.step}>
+          <div className={styles.stepIntro}><span className={styles.eyebrow}>Set the shape</span><h2 className="section-title">The basics</h2><p>Give your crew a name, a window, and just enough context to say yes.</p></div>
+          <div className={styles.field}>
+            <label>What&apos;s the hangout?</label>
             <input
               type="text"
               value={name}
@@ -598,8 +537,8 @@ function CreatePageInner() {
               className="input"
             />
           </div>
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Your name</label>
+          <div className={styles.field}>
+            <label>Your name</label>
             <input
               type="text"
               value={creatorName}
@@ -608,9 +547,7 @@ function CreatePageInner() {
               className="input"
             />
           </div>
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>When?</label>
-          </div>
+          <div className={styles.field}><label>When?</label><span className={styles.fieldHelp}>Pick a flexible range, or only the days that work.</span></div>
 
           {/* Unified calendar picker (mode toggle + presets + calendar all in one) */}
           <DatePicker
@@ -622,8 +559,8 @@ function CreatePageInner() {
               setSelectedDates(v.dates || [])
             }}
           />
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Location (optional)</label>
+          <div className={styles.field}>
+            <label>Location <span aria-hidden="true">(optional)</span></label>
             <input
               type="text"
               value={location}
@@ -632,8 +569,8 @@ function CreatePageInner() {
               className="input"
             />
           </div>
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>Duration</label>
+          <div className={styles.field}>
+            <label>Duration</label>
             <div style={{ display: 'flex', gap: 8 }}>
               {[
                 { value: 1, label: '1 hour' },
@@ -654,9 +591,9 @@ function CreatePageInner() {
           </div>
           {/* How precise do we ask responders to be. Blocks is the 80% default;
               hourly is for power users with real precision requirements. */}
-          <div>
-            <label className="label" style={{ display: 'block', marginBottom: 8 }}>How precise?</label>
-            <div style={{ display: 'flex', gap: 8 }}>
+          <div className={styles.field}>
+            <label>How precise should availability be?</label>
+            <div className={styles.choiceGrid}>
               {[
                 {
                   value: 'blocks' as const, title: 'Quick blocks', sub: '4 taps per day',
@@ -685,29 +622,15 @@ function CreatePageInner() {
                     key={g.value}
                     onClick={() => setTimeGranularity(g.value)}
                     aria-pressed={selected}
-                    style={{
-                      flex: 1,
-                      padding: '14px 12px',
-                      background: selected ? 'var(--maybe-light)' : 'var(--surface)',
-                      border: `2px solid ${selected ? 'var(--accent)' : 'var(--border-light)'}`,
-                      borderRadius: 'var(--radius-md)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      display: 'flex', flexDirection: 'column', gap: 2,
-                      color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    }}
+                    className={styles.choice}
                   >
-                    <span style={{ lineHeight: 1, display: 'inline-flex' }}>{g.icon}</span>
-                    <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--text-primary)', marginTop: 6 }}>
-                      {g.title}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.sub}</span>
+                    {g.icon}<strong>{g.title}</strong><small>{g.sub}</small>
                   </button>
                 )
               })}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className={styles.actionRow}>
             <button onClick={() => setStep(0)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
               onClick={() => setStep(2)}
@@ -723,10 +646,11 @@ function CreatePageInner() {
 
       {/* Step 2: Activities + cost */}
       {step === 2 && (
-        <motion.div key="step2" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <div>
+        <motion.div key="step2" {...stepTransition} className={styles.step}>
+          <div className={styles.stepIntro}>
+            <span className={styles.eyebrow}>Give them a say</span>
             <h2 className="section-title">What could you do?</h2>
-            <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+            <p>
               Pick options for your group to vote on.
             </p>
           </div>
@@ -846,7 +770,7 @@ function CreatePageInner() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className={styles.actionRow}>
             <button onClick={() => setStep(1)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
               onClick={() => setStep(3)}
@@ -860,16 +784,7 @@ function CreatePageInner() {
           <div style={{ textAlign: 'center' }}>
             <button
               onClick={() => setStep(3)}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 13,
-                color: 'var(--text-muted)',
-                fontFamily: 'var(--font-mono)',
-                letterSpacing: '0.04em',
-                padding: '4px 8px',
-              }}
+            className={styles.skip}
             >
               Skip — just find a time
             </button>
@@ -889,10 +804,11 @@ function CreatePageInner() {
         ].filter(Boolean).length
 
         return (
-        <motion.div key="step3" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div>
+        <motion.div key="step3" {...stepTransition} className={styles.step}>
+          <div className={styles.stepIntro}>
+            <span className={styles.eyebrow}>Optional, but nice</span>
             <h2 className="section-title">Add a vibe</h2>
-            <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8 }}>
+            <p>
               Totally optional. Hit Skip to move on.
             </p>
           </div>
@@ -1101,7 +1017,7 @@ function CreatePageInner() {
             )}
           </AnimatePresence>
 
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className={styles.actionRow}>
             <button onClick={() => setStep(2)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             {/* Label is always "Skip" or "Continue" based on fill — never "Next" */}
             <button onClick={() => setStep(4)} className="btn-primary" style={{ flex: 1 }}>
@@ -1114,9 +1030,9 @@ function CreatePageInner() {
 
       {/* Step 4: Review */}
       {step === 4 && (
-        <motion.div key="step4" {...stepTransition} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <h2 className="section-title">Review &amp; create</h2>
-          <div className="card" style={{ padding: 24 }}>
+        <motion.div key="step4" {...stepTransition} className={styles.step}>
+          <div className={styles.stepIntro}><span className={styles.eyebrow}>One last look</span><h2 className="section-title">Ready to ask the group?</h2><p>They’ll choose a time and vote on the plan from one link.</p></div>
+          <div className={styles.review}>
             <div className="label">Hangout</div>
             <div style={{
               fontFamily: 'var(--font-display)',
@@ -1193,7 +1109,7 @@ function CreatePageInner() {
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className={styles.actionRow}>
             <button onClick={() => setStep(3)} className="btn-secondary" style={{ flex: 1 }}>Back</button>
             <button
               onClick={handleCreate}

@@ -1,9 +1,12 @@
-// /crews/new — 2-step flow: crew name/description → invite members.
+// Crew creation — a compact two-step setup with optional invitations.
+'use client'
 
-"use client"
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
+import product from '@/app/product.module.css'
+
+type InviteResult = { email: string; ok: boolean; devLink?: string }
+type CreateCrewResponse = { crew: { id: string }; invited?: InviteResult[] }
 
 export default function NewCrew() {
   const router = useRouter()
@@ -13,245 +16,55 @@ export default function NewCrew() {
   const [emailsText, setEmailsText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [me, setMe] = useState<{ user: any } | null>(null)
-  // When Resend isn't configured, the API returns per-invite devLinks that
-  // the exec needs to copy-paste manually. Hold them until dismissed.
+  const [me, setMe] = useState<{ user: unknown } | null>(null)
   const [devLinks, setDevLinks] = useState<{ email: string; link: string }[] | null>(null)
   const [createdCrewId, setCreatedCrewId] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch('/api/me').then(r => r.json()).then(setMe)
-  }, [])
-
-  useEffect(() => {
-    if (me && !me.user) router.replace('/login?redirect=/crews/new')
-  }, [me, router])
-
-  const emails = emailsText
-    .split(/[\s,;\n]+/)
-    .map(s => s.trim().toLowerCase())
-    .filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s))
+  useEffect(() => { fetch('/api/me').then(r => r.json()).then(setMe) }, [])
+  useEffect(() => { if (me && !me.user) router.replace('/login?redirect=/crews/new') }, [me, router])
+  const emails = emailsText.split(/[\s,;\n]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s))
 
   async function handleCreate() {
     if (!name.trim()) return
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     try {
-      const res = await fetch('/api/crews', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || undefined,
-          inviteEmails: emails.length ? emails : undefined,
-        }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        throw new Error(j.error || `HTTP ${res.status}`)
-      }
-      const { crew, invited } = await res.json()
-      const links = (invited || [])
-        .filter((i: any) => i.ok && i.devLink)
-        .map((i: any) => ({ email: i.email, link: i.devLink }))
-      if (links.length > 0) {
-        // Show the links so exec can paste them into DMs. Don't navigate away
-        // until user dismisses.
-        setDevLinks(links)
-        setCreatedCrewId(crew.id)
-        setLoading(false)
-        return
-      }
+      const res = await fetch('/api/crews', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, inviteEmails: emails.length ? emails : undefined }) })
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `HTTP ${res.status}`) }
+      const { crew, invited } = await res.json() as CreateCrewResponse
+      const links = (invited || []).filter((invite) => invite.ok && invite.devLink).map((invite) => ({ email: invite.email, link: invite.devLink! }))
+      if (links.length) { setDevLinks(links); setCreatedCrewId(crew.id); return }
       router.push(`/crews/${crew.id}`)
-    } catch (e: any) {
-      setError(e.message || 'Something went wrong')
-      setLoading(false)
-    }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Something went wrong') } finally { setLoading(false) }
   }
-
   if (!me || !me.user) return null
-
-  // Post-create: show the copy-paste invite links when email wasn't sent
-  if (devLinks && createdCrewId) {
-    return (
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '32px 24px' }}>
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, letterSpacing: '-0.04em', margin: '0 0 8px' }}>
-            Crew created ✓
-          </h1>
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 20px' }}>
-            Email isn&apos;t set up yet, so your members won&apos;t get invite emails. Copy these links and paste them into DMs / your group chat:
-          </p>
-        </motion.div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-          {devLinks.map(dl => (
-            <DevLinkRow key={dl.email} email={dl.email} link={dl.link} />
-          ))}
-        </div>
-        <button
-          onClick={() => router.push(`/crews/${createdCrewId}`)}
-          className="btn-primary"
-          style={{ padding: 14, fontSize: 15, width: '100%' }}
-        >
-          Continue to crew
-        </button>
-      </div>
-    )
-  }
+  if (devLinks && createdCrewId) return <InviteLinks links={devLinks} onContinue={() => router.push(`/crews/${createdCrewId}`)} />
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: '32px 24px' }}>
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="label" style={{ marginBottom: 8 }}>Step {step + 1} of 2</div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 800, letterSpacing: '-0.04em', margin: '0 0 20px' }}>
-          {step === 0 ? 'Name your crew' : 'Invite members'}
-        </h1>
-      </motion.div>
-
-      <AnimatePresence mode="wait">
-        {step === 0 ? (
-          <motion.div
-            key="step1"
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -10 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Name</span>
-              <input
-                autoFocus
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="UNSW Climbing Society"
-                maxLength={80}
-                style={{
-                  padding: '12px 14px', fontSize: 16, borderRadius: 10,
-                  border: '1.5px solid var(--border-light)', background: 'var(--surface)',
-                }}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Description (optional)</span>
-              <textarea
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                placeholder="Weekly bouldering + beer"
-                maxLength={400}
-                rows={3}
-                style={{
-                  padding: '12px 14px', fontSize: 15, borderRadius: 10,
-                  border: '1.5px solid var(--border-light)', background: 'var(--surface)',
-                  fontFamily: 'inherit', resize: 'vertical',
-                }}
-              />
-            </label>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => router.back()}
-                style={{ flex: 1, padding: 12, background: 'none', border: '1.5px solid var(--border-light)', borderRadius: 10, fontSize: 14, cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setStep(1)}
-                disabled={!name.trim()}
-                className="btn-primary"
-                style={{ flex: 2, padding: 12, opacity: name.trim() ? 1 : 0.5 }}
-              >
-                Next →
-              </button>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="step2"
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -10 }}
-            style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                Member emails (optional — you can add more later)
-              </span>
-              <textarea
-                autoFocus
-                value={emailsText}
-                onChange={e => setEmailsText(e.target.value)}
-                placeholder={'sarah@unsw.edu.au\nnoah@example.com'}
-                rows={6}
-                style={{
-                  padding: '12px 14px', fontSize: 14, borderRadius: 10,
-                  border: '1.5px solid var(--border-light)', background: 'var(--surface)',
-                  fontFamily: 'var(--font-mono), monospace', resize: 'vertical',
-                }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                Paste or type — separated by spaces, commas, or new lines.
-                {emails.length > 0 && <strong> {emails.length} valid email{emails.length === 1 ? '' : 's'}.</strong>}
-              </span>
-            </label>
-
-            {error && (
-              <div style={{ fontSize: 13, color: 'var(--error)', padding: '4px 2px' }}>{error}</div>
-            )}
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setStep(0)}
-                disabled={loading}
-                style={{ flex: 1, padding: 12, background: 'none', border: '1.5px solid var(--border-light)', borderRadius: 10, fontSize: 14, cursor: 'pointer' }}
-              >
-                ← Back
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={loading}
-                className="btn-primary"
-                style={{ flex: 2, padding: 12, opacity: loading ? 0.6 : 1 }}
-              >
-                {loading ? 'Creating…' : emails.length ? `Create & invite ${emails.length}` : 'Create crew'}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className={product.pageNarrow}>
+      <header className={product.stepHeader}>
+        <div className={product.stepTrack} aria-label={`Step ${step + 1} of 2`}><span data-active="true" /><span data-active={step === 1} /></div>
+        <span className={product.eyebrow}>Step {step + 1} of 2</span>
+        <h1 className={product.title}>{step === 0 ? 'Give the group a home.' : 'Bring in the usual suspects.'}</h1>
+        <p className={product.lede}>{step === 0 ? 'Set the name everyone will recognise. You can keep the description loose.' : 'Invite people now, or make the crew first and add them once you are in.'}</p>
+      </header>
+      {step === 0 ? <div className={product.form}>
+        <label className={product.field}><span className={product.fieldLabel}>Crew name</span><input className={product.control} value={name} onChange={e => setName(e.target.value)} placeholder="UNSW Climbing Society" maxLength={80} /></label>
+        <label className={product.field}><span className={product.fieldLabel}>A little context <em>(optional)</em></span><textarea className={product.textArea} value={description} onChange={e => setDescription(e.target.value)} placeholder="Weekly bouldering + beer" maxLength={400} rows={3} /></label>
+        <div className={product.actions}><button className="btn-secondary" onClick={() => router.back()}>Cancel</button><button className="btn-primary" onClick={() => setStep(1)} disabled={!name.trim()}>Continue <span aria-hidden="true">→</span></button></div>
+      </div> : <div className={product.form}>
+        <label className={product.field}><span className={product.fieldLabel}>Member emails <em>(optional)</em></span><textarea className={product.textArea} value={emailsText} onChange={e => setEmailsText(e.target.value)} placeholder={'sarah@unsw.edu.au\nnoah@example.com'} rows={6} /><span className={product.fieldHint}>Separate emails with spaces, commas, or new lines.{emails.length > 0 && <strong> {emails.length} valid email{emails.length === 1 ? '' : 's'}.</strong>}</span></label>
+        {error && <div className={product.error} role="alert">{error}</div>}
+        <div className={product.actions}><button className="btn-secondary" onClick={() => setStep(0)} disabled={loading}>Back</button><button className="btn-primary" onClick={handleCreate} disabled={loading}>{loading ? 'Creating…' : emails.length ? `Create & invite ${emails.length}` : 'Create crew'}</button></div>
+      </div>}
     </div>
   )
 }
 
+function InviteLinks({ links, onContinue }: { links: { email: string; link: string }[]; onContinue: () => void }) {
+  return <div className={product.pageNarrow}><header className={product.stepHeader}><span className={product.eyebrow}>Crew created</span><h1 className={product.title}>The invite is in your hands.</h1><p className={product.lede}>Email is not configured, so copy each personal link into the group chat or a DM.</p></header><section className={product.section}><div className={product.sectionHeader}><h2 className={product.sectionTitle}>Invite links</h2></div>{links.map(link => <DevLinkRow key={link.email} {...link} />)}</section><button className="btn-primary" onClick={onContinue}>Continue to crew</button></div>
+}
+
 function DevLinkRow({ email, link }: { email: string; link: string }) {
   const [copied, setCopied] = useState(false)
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(link)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch { /* ignore */ }
-  }
-  return (
-    <div style={{
-      padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border-light)', borderRadius: 10,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700 }}>{email}</div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', wordBreak: 'break-all', marginTop: 2 }}>
-          {link.length > 60 ? link.slice(0, 58) + '…' : link}
-        </div>
-      </div>
-      <button
-        onClick={copy}
-        style={{
-          fontSize: 11, fontWeight: 700, padding: '6px 10px', borderRadius: 6,
-          background: copied ? 'var(--free-light, #E8F8EE)' : 'var(--accent)',
-          color: copied ? 'var(--success, #1a7a3a)' : 'var(--accent-text)',
-          border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-        }}
-      >
-        {copied ? '✓ Copied' : 'Copy'}
-      </button>
-    </div>
-  )
+  async function copy() { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1600) } catch { /* Clipboard access can be unavailable. */ } }
+  return <div className={product.inviteRow}><div><strong>{email}</strong><code>{link}</code></div><button className={product.smallButton} onClick={copy}>{copied ? 'Copied' : 'Copy link'}</button></div>
 }

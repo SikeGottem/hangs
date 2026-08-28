@@ -1,23 +1,18 @@
-// /crews/[id]/profile — self-edit my profile within a crew.
-// Fields: displayName, dietary, transportPreference, contactPhone.
-// These are the fields that save time on every future hang.
+// Crew profile defaults — reusable member details and weekly availability.
+'use client'
 
-"use client"
 import { useEffect, useState, use } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+import product from '@/app/product.module.css'
+import styles from './profile.module.css'
 
-const TRANSPORT_OPTIONS: { value: string; label: string }[] = [
-  { value: 'none', label: 'No preference' },
-  { value: 'driving', label: "I drive, can take others" },
-  { value: 'need_ride', label: 'Need a ride' },
-  { value: 'own_way', label: 'Making my own way' },
-  { value: 'passenger', label: 'Happy to be a passenger' },
+const TRANSPORT_OPTIONS = [
+  { value: 'none', label: 'No preference' }, { value: 'driving', label: 'I drive, can take others' }, { value: 'need_ride', label: 'Need a ride' }, { value: 'own_way', label: 'Making my own way' }, { value: 'passenger', label: 'Happy to be a passenger' },
 ]
-
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
-const GRID_HOURS = Array.from({ length: 14 }, (_, i) => i + 8) // 8am → 9pm
+const GRID_HOURS = Array.from({ length: 14 }, (_, index) => index + 8)
+type Shape = Record<string, 'free' | 'maybe' | 'busy'>
 
 export default function ProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: crewId } = use(params)
@@ -30,219 +25,51 @@ export default function ProfilePage({ params }: { params: Promise<{ id: string }
   const [dietary, setDietary] = useState('')
   const [transport, setTransport] = useState('none')
   const [phone, setPhone] = useState('')
-  const [shape, setShape] = useState<Record<string, 'free' | 'maybe' | 'busy'>>({})
+  const [shape, setShape] = useState<Shape>({})
   const [status, setStatus] = useState<null | 'saved' | 'error'>(null)
 
-  useEffect(() => {
-    (async () => {
-      const res = await fetch(`/api/crews/${crewId}/state`)
-      if (res.status === 401) { router.replace(`/login?redirect=/crews/${crewId}/profile`); return }
-      if (!res.ok) { setLoading(false); return }
-      const d = await res.json()
-      setCrewName(d.crew.name)
-      setMyUserId(d.myProfile?.userId || null)
-      setDisplayName(d.myProfile?.displayName || '')
-      setDietary(d.myProfile?.dietary || '')
-      setTransport(d.myProfile?.transportPreference || 'none')
-      setPhone(d.myProfile?.contactPhone || '')
-      setShape(d.myProfile?.availabilityShape || {})
-      setLoading(false)
-    })()
-  }, [crewId, router])
+  useEffect(() => { (async () => {
+    const res = await fetch(`/api/crews/${crewId}/state`)
+    if (res.status === 401) { router.replace(`/login?redirect=/crews/${crewId}/profile`); return }
+    if (!res.ok) { setLoading(false); return }
+    const data = await res.json()
+    setCrewName(data.crew.name); setMyUserId(data.myProfile?.userId || null); setDisplayName(data.myProfile?.displayName || '')
+    setDietary(data.myProfile?.dietary || ''); setTransport(data.myProfile?.transportPreference || 'none'); setPhone(data.myProfile?.contactPhone || ''); setShape(data.myProfile?.availabilityShape || {}); setLoading(false)
+  })() }, [crewId, router])
 
   function toggleShapeCell(day: string, hour: number) {
     const key = `${day}|${hour}`
-    setShape(prev => {
-      const cur = prev[key] || 'busy'
-      const next = cur === 'busy' ? 'free' : cur === 'free' ? 'maybe' : 'busy'
-      const updated = { ...prev }
-      if (next === 'busy') delete updated[key]
-      else updated[key] = next
-      return updated
-    })
+    setShape(previous => { const current = previous[key] || 'busy'; const next = current === 'busy' ? 'free' : current === 'free' ? 'maybe' : 'busy'; const updated = { ...previous }; if (next === 'busy') delete updated[key]; else updated[key] = next; return updated })
   }
-
   async function handleSave() {
     if (!myUserId) return
-    setSaving(true)
-    setStatus(null)
+    setSaving(true); setStatus(null)
     try {
-      const res = await fetch(`/api/crews/${crewId}/members/${myUserId}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          displayName: displayName.trim() || undefined,
-          dietary,
-          transportPreference: transport,
-          contactPhone: phone,
-          availabilityShape: shape,
-        }),
-      })
-      if (!res.ok) throw new Error('save failed')
-      setStatus('saved')
-    } catch {
-      setStatus('error')
-    } finally {
-      setSaving(false)
-    }
+      const res = await fetch(`/api/crews/${crewId}/members/${myUserId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: displayName.trim() || undefined, dietary, transportPreference: transport, contactPhone: phone, availabilityShape: shape }) })
+      if (!res.ok) throw new Error('save failed'); setStatus('saved')
+    } catch { setStatus('error') } finally { setSaving(false) }
   }
+  if (loading) return <div className={product.statusPage}>Loading…</div>
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading…</div>
-
-  return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: '24px 20px 48px' }}>
-      <Link href={`/crews/${crewId}`} style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'none' }}>
-        ← {crewName}
-      </Link>
-
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginTop: 8 }}>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, letterSpacing: '-0.04em', margin: '8px 0 6px' }}>
-          Your profile
-        </h1>
-        <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 24px' }}>
-          Fill this once — every future {crewName} hang will pre-fill from it.
-        </p>
-      </motion.div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Field label="Display name">
-          <input
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-            placeholder="How you appear to the crew"
-            style={inputStyle}
-          />
-        </Field>
-
-        <Field label="Dietary (optional)">
-          <input
-            value={dietary}
-            onChange={e => setDietary(e.target.value)}
-            placeholder="e.g. vegetarian, no nuts, lactose-free"
-            style={inputStyle}
-          />
-        </Field>
-
-        <Field label="Transport preference">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {TRANSPORT_OPTIONS.map(opt => (
-              <label key={opt.value} style={{
-                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-                borderRadius: 8, cursor: 'pointer',
-                background: transport === opt.value ? 'var(--maybe-light)' : 'var(--surface)',
-                border: `1.5px solid ${transport === opt.value ? '#F5C842' : 'var(--border-light)'}`,
-              }}>
-                <input
-                  type="radio"
-                  name="transport"
-                  value={opt.value}
-                  checked={transport === opt.value}
-                  onChange={() => setTransport(opt.value)}
-                />
-                <span style={{ fontSize: 14 }}>{opt.label}</span>
-              </label>
-            ))}
-          </div>
-        </Field>
-
-        <Field label="Phone (optional, shared with crew)">
-          <input
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            placeholder="+61 4…"
-            style={inputStyle}
-          />
-        </Field>
-
-        <Field label="My typical availability (tap to paint free / maybe)">
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.4 }}>
-            When are you usually free? On a new hang, tap &quot;Use my usual&quot; and this pattern is applied to the hang dates.
-          </div>
-          <ShapeGrid shape={shape} onToggle={toggleShapeCell} />
-        </Field>
-
-        {status === 'saved' && (
-          <div style={{ fontSize: 13, color: 'var(--success, #1a7a3a)', padding: '4px 2px' }}>Saved ✓</div>
-        )}
-        {status === 'error' && (
-          <div style={{ fontSize: 13, color: 'var(--error)', padding: '4px 2px' }}>Couldn&apos;t save — try again</div>
-        )}
-
-        <button
-          onClick={handleSave}
-          disabled={saving || !myUserId}
-          className="btn-primary"
-          style={{ padding: 14, fontSize: 15, opacity: saving ? 0.6 : 1 }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      </div>
+  return <div className={product.pageNarrow}>
+    <Link href={`/crews/${crewId}`} className={product.backLink}>← {crewName || 'Back to crew'}</Link>
+    <header className={styles.header}><span className={product.eyebrow}>Your reusable defaults</span><h1 className={product.title}>Save the things you do not want to repeat.</h1><p className={product.lede}>When {crewName || 'your crew'} starts a new hang, your name, needs, transport, and usual rhythm are ready to use.</p></header>
+    <div className={product.form}>
+      <section className={styles.section} aria-labelledby="identity-heading"><h2 id="identity-heading" className={product.sectionTitle}>The basics</h2>
+        <label className={product.field}><span className={product.fieldLabel}>Display name</span><input className={product.control} value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="How you appear to the crew" /></label>
+        <label className={product.field}><span className={product.fieldLabel}>Dietary <em>(optional)</em></span><input className={product.control} value={dietary} onChange={event => setDietary(event.target.value)} placeholder="e.g. vegetarian, no nuts, lactose-free" /></label>
+        <label className={product.field}><span className={product.fieldLabel}>Phone <em>(optional · shared with crew)</em></span><input className={product.control} value={phone} onChange={event => setPhone(event.target.value)} placeholder="+61 4…" /></label>
+      </section>
+      <section className={styles.section} aria-labelledby="transport-heading"><h2 id="transport-heading" className={product.sectionTitle}>Getting there</h2><div className={product.radioList}>{TRANSPORT_OPTIONS.map(option => <label key={option.value} className={product.radioRow} data-selected={transport === option.value}><input type="radio" name="transport" value={option.value} checked={transport === option.value} onChange={() => setTransport(option.value)} /><span>{option.label}</span></label>)}</div></section>
+      <section className={styles.section} aria-labelledby="availability-heading"><div className={styles.availabilityTitle}><div><h2 id="availability-heading" className={product.sectionTitle}>Your usual rhythm</h2><p>Tap a block to cycle through <strong>free</strong>, <strong>maybe</strong>, and <strong>busy</strong>. These defaults can be applied to new hangs.</p></div><div className={styles.legend} aria-label="Availability key"><span data-state="free">Free</span><span data-state="maybe">Maybe</span><span data-state="busy">Busy</span></div></div><ShapeGrid shape={shape} onToggle={toggleShapeCell} /></section>
+      {status === 'saved' && <div className={product.success} role="status">Saved — your defaults are ready for the next hang.</div>}
+      {status === 'error' && <div className={product.error} role="alert">Couldn&apos;t save your defaults. Try again.</div>}
+      <button onClick={handleSave} disabled={saving || !myUserId} className="btn-primary">{saving ? 'Saving…' : 'Save defaults'}</button>
     </div>
-  )
+  </div>
 }
 
-const inputStyle: React.CSSProperties = {
-  padding: '12px 14px',
-  fontSize: 15,
-  borderRadius: 10,
-  border: '1.5px solid var(--border-light)',
-  background: 'var(--surface)',
-  width: '100%',
-  boxSizing: 'border-box',
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{label}</span>
-      {children}
-    </label>
-  )
-}
-
-function ShapeGrid({ shape, onToggle }: {
-  shape: Record<string, 'free' | 'maybe' | 'busy'>
-  onToggle: (day: string, hour: number) => void
-}) {
-  function cellColor(status: string | undefined) {
-    if (status === 'free') return { bg: '#34C26A', border: '#2AA359' }
-    if (status === 'maybe') return { bg: '#F5C842', border: '#DAA816' }
-    return { bg: '#F2EFE8', border: '#E8E3D9' }
-  }
-  const fmtHour = (h: number) => h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`
-  return (
-    <div style={{ display: 'inline-grid', gridTemplateColumns: `28px repeat(${DAYS.length}, 1fr)`, gap: 2, width: '100%' }}>
-      <div />
-      {DAYS.map(d => (
-        <div key={d} style={{ fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)', textAlign: 'center', color: 'var(--text-muted)', padding: '2px 0' }}>
-          {d}
-        </div>
-      ))}
-      {GRID_HOURS.map(h => (
-        <div key={h} style={{ display: 'contents' }}>
-          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 3 }}>
-            {fmtHour(h)}
-          </div>
-          {DAYS.map(d => {
-            const key = `${d}|${h}`
-            const c = cellColor(shape[key])
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onToggle(d, h)}
-                style={{
-                  height: 22, padding: 0,
-                  background: c.bg, border: `1px solid ${c.border}`,
-                  borderRadius: 4, cursor: 'pointer',
-                  minWidth: 0,
-                }}
-                aria-label={`${d} ${h}:00 ${shape[key] || 'busy'}`}
-              />
-            )
-          })}
-        </div>
-      ))}
-    </div>
-  )
+function ShapeGrid({ shape, onToggle }: { shape: Shape; onToggle: (day: string, hour: number) => void }) {
+  const formatHour = (hour: number) => hour < 12 ? `${hour}a` : hour === 12 ? '12p' : `${hour - 12}p`
+  return <div className={styles.gridWrap}><div className={styles.grid} role="grid" aria-label="Typical availability, Monday through Sunday, 8am through 9pm"><div /><>{DAYS.map(day => <div key={day} className={styles.day}>{day}</div>)}</>{GRID_HOURS.map(hour => <div className={styles.gridRow} key={hour}><div className={styles.hour}>{formatHour(hour)}</div>{DAYS.map(day => { const status = shape[`${day}|${hour}`] || 'busy'; return <button key={day} type="button" className={styles.cell} data-state={status} onClick={() => onToggle(day, hour)} aria-label={`${day} ${formatHour(hour)}: ${status}. Tap to change.`} /> })}</div>)}</div></div>
 }

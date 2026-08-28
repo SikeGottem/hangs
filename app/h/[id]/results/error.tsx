@@ -2,6 +2,8 @@
 // and shows a recoverable fallback instead of Next's default stack trace.
 "use client"
 import { useEffect } from "react"
+import Link from "next/link"
+import styles from "./results.module.css"
 
 export default function ResultsError({
   error,
@@ -15,11 +17,7 @@ export default function ResultsError({
   }, [error])
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', minHeight: '60vh', padding: '48px 24px',
-      textAlign: 'center', gap: 14,
-    }}>
+    <div className={styles.errorPage}>
       <div style={{
         width: 56, height: 56, borderRadius: '50%',
         background: '#fef2f2', color: 'var(--error)',
@@ -28,13 +26,10 @@ export default function ResultsError({
       }}>
         ⚠︎
       </div>
-      <h1 style={{
-        fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800,
-        letterSpacing: '-0.03em', color: 'var(--text-primary)',
-      }}>
+      <h1 className={styles.errorTitle}>
         Something went sideways
       </h1>
-      <p style={{ fontSize: 14, color: 'var(--text-secondary)', maxWidth: 340, lineHeight: 1.5 }}>
+      <p className={styles.errorCopy}>
         Your hang is safe — this is just the view that crashed. Try again, or if
         it keeps breaking, send Ethan the request ID below.
       </p>
@@ -46,7 +41,7 @@ export default function ResultsError({
           {error.digest}
         </code>
       )}
-      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+      <div className={styles.errorActions}>
         <button
           onClick={reset}
           className="btn-primary"
@@ -54,9 +49,9 @@ export default function ResultsError({
         >
           Try again
         </button>
-        <a href="/" className="btn-secondary" style={{ padding: '12px 22px', textDecoration: 'none' }}>
+        <Link href="/" className="btn-secondary" style={{ padding: '12px 22px', textDecoration: 'none' }}>
           Home
-        </a>
+        </Link>
       </div>
     </div>
   )

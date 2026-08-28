@@ -11,6 +11,7 @@ import { getDb, ensureSchema, genId } from '@/lib/db'
 import { requireUser, signParticipantToken } from '@/lib/auth'
 import { serverError, notFound, forbidden } from '@/lib/errors'
 import { logEvent } from '@/lib/analytics'
+import { addCalendarDays, calendarDateInTimeZone, calendarDayOfWeek, differenceInCalendarDays } from '@/lib/time'
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -57,7 +58,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const newHangId = genId()
     const newCreatorId = genId()
 
-    const isoDay = (d: Date) => d.toISOString().split('T')[0]
+    const today = calendarDateInTimeZone(new Date(), 'Australia/Sydney')
+      || new Date().toISOString().slice(0, 10)
 
     // Roll specific weekday dates forward by whole weeks rather than forcing
     // today→+7, so "next Friday" stays a Friday if the parent was a Friday hang.
@@ -66,24 +68,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const rollDateForward = (isoDate: string | null): string => {
       if (!isoDate) {
         // No parent date — fall back to today
-        return isoDay(new Date())
+        return today
       }
-      const base = new Date(isoDate + 'T00:00:00')
-      const now = new Date()
-      now.setHours(0, 0, 0, 0)
-      const dowBase = base.getDay() // 0=Sun … 6=Sat
+      const dowBase = calendarDayOfWeek(isoDate)
+      if (dowBase === null) return today
       // Walk forward in 7-day steps until the date is strictly in the future.
-      const candidate = new Date(base)
-      while (candidate <= now) {
-        candidate.setDate(candidate.getDate() + 7)
+      let candidate = isoDate
+      while (candidate <= today) {
+        const next = addCalendarDays(candidate, 7)
+        if (!next) return today
+        candidate = next
       }
       // Sanity: day-of-week must be preserved
-      if (candidate.getDay() !== dowBase) {
+      const candidateDow = calendarDayOfWeek(candidate)
+      if (candidateDow !== null && candidateDow !== dowBase) {
         // Shouldn't happen, but guard against DST edge cases
-        const diff = (dowBase - candidate.getDay() + 7) % 7
-        candidate.setDate(candidate.getDate() + diff)
+        const diff = (dowBase - candidateDow + 7) % 7
+        candidate = addCalendarDays(candidate, diff) || candidate
       }
-      return isoDay(candidate)
+      return candidate
     }
 
     const parentStart = parent.date_range_start as string | null
@@ -94,28 +97,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // Preserve the day-spread from the parent (e.g. a 3-day window stays 3 days).
     let end: string
     if (parentStart && parentEnd) {
-      const spreadMs =
-        new Date(parentEnd + 'T00:00:00').getTime() -
-        new Date(parentStart + 'T00:00:00').getTime()
-      const spreadDays = Math.round(spreadMs / 86_400_000)
-      const endDate = new Date(start + 'T00:00:00')
-      endDate.setDate(endDate.getDate() + spreadDays)
-      end = isoDay(endDate)
+      const spreadDays = differenceInCalendarDays(parentStart, parentEnd)
+      end = addCalendarDays(start, Math.max(0, spreadDays ?? 0)) || start
     } else {
-      const weekOut = new Date(start + 'T00:00:00')
-      weekOut.setDate(weekOut.getDate() + 7)
-      end = isoDay(weekOut)
+      end = addCalendarDays(start, 7) || start
     }
 
     // Shift response_deadline by the same forward-offset as the start date.
     let shiftedDeadline: string | null = null
     const parentDeadlineRaw = parent.response_deadline as string | null
     if (parentDeadlineRaw && parentStart) {
-      const parentStartMs = new Date(parentStart + 'T00:00:00').getTime()
-      const newStartMs = new Date(start + 'T00:00:00').getTime()
-      const offsetMs = newStartMs - parentStartMs
-      const deadlineDate = new Date(new Date(parentDeadlineRaw).getTime() + offsetMs)
-      shiftedDeadline = isoDay(deadlineDate)
+      const offsetDays = differenceInCalendarDays(parentStart, start)
+      shiftedDeadline = offsetDays === null ? null : addCalendarDays(parentDeadlineRaw, offsetDays)
     }
 
     // Carry forward time_granularity; treat null/unknown as 'blocks' (80% default).

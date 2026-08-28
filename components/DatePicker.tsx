@@ -213,12 +213,22 @@ export default function DatePicker({ value, onChange }: Props) {
           font-weight: 700;
           color: var(--text-muted);
           cursor: pointer;
-          transition: all 0.15s ease;
+          min-height: 44px;
+          transition-property: background-color, color, box-shadow, transform;
+          transition-duration: 150ms;
+          transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
         }
-        .hangs-datepicker .seg button[aria-pressed="true"] {
+        .hangs-datepicker .seg button[aria-selected="true"] {
           background: var(--surface);
           color: var(--text-primary);
           box-shadow: var(--shadow-sm);
+        }
+        .hangs-datepicker .seg button:active { transform: scale(0.96); }
+        .hangs-datepicker .seg button:focus-visible,
+        .hangs-datepicker .preset:focus-visible,
+        .hangs-datepicker .summary button:focus-visible {
+          outline: 2px solid var(--celebrate);
+          outline-offset: 2px;
         }
         .hangs-datepicker .presets {
           display: flex;
@@ -244,22 +254,27 @@ export default function DatePicker({ value, onChange }: Props) {
           color: var(--text-primary);
           cursor: pointer;
           white-space: nowrap;
-          transition: all 0.15s ease;
+          min-height: 44px;
+          transition-property: background-color, border-color, color, transform;
+          transition-duration: 150ms;
+          transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
         }
         .hangs-datepicker .preset:hover {
           background: var(--maybe-light);
           border-color: var(--accent);
         }
+        .hangs-datepicker .preset:active { transform: scale(0.96); }
         .hangs-datepicker .rdp-root {
-          --rdp-accent-color: var(--accent);
-          --rdp-accent-background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+          --rdp-accent-color: var(--celebrate);
+          --rdp-accent-background-color: color-mix(in srgb, var(--celebrate) 16%, transparent);
           --rdp-day-height: 44px;
           --rdp-day-width: 44px;
           --rdp-day_button-height: 40px;
           --rdp-day_button-width: 40px;
           --rdp-day_button-border-radius: 10px;
-          --rdp-selected-border: 1.5px solid var(--accent);
-          --rdp-today-color: var(--accent);
+          --rdp-selected-border: 1.5px solid var(--celebrate);
+          --rdp-today-color: var(--celebrate);
+          font-variant-numeric: tabular-nums;
           font-family: var(--font-display);
         }
         .hangs-datepicker .rdp-caption_label {
@@ -280,17 +295,19 @@ export default function DatePicker({ value, onChange }: Props) {
           font-size: 14px;
           font-weight: 600;
           color: var(--text-primary);
-          transition: background 0.12s ease;
+          transition-property: background-color, color, transform;
+          transition-duration: 120ms;
+          transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
         }
         .hangs-datepicker .rdp-day_button:hover:not([disabled]) {
           background: var(--surface-dim);
         }
         .hangs-datepicker .rdp-day_button:focus-visible {
-          outline: 2px solid var(--accent);
+          outline: 2px solid var(--celebrate);
           outline-offset: 1px;
         }
         .hangs-datepicker .rdp-today .rdp-day_button {
-          color: var(--accent);
+          color: var(--celebrate);
           font-weight: 800;
         }
         .hangs-datepicker .rdp-disabled .rdp-day_button {
@@ -300,8 +317,8 @@ export default function DatePicker({ value, onChange }: Props) {
         .hangs-datepicker .rdp-selected .rdp-day_button,
         .hangs-datepicker .rdp-range_start .rdp-day_button,
         .hangs-datepicker .rdp-range_end .rdp-day_button {
-          background: var(--accent);
-          color: var(--accent-text);
+          background: var(--celebrate);
+          color: #fffaf1;
           font-weight: 800;
           box-shadow: var(--shadow-sm);
         }
@@ -336,6 +353,10 @@ export default function DatePicker({ value, onChange }: Props) {
           padding: 4px 8px;
         }
         .hangs-datepicker .summary button:hover { color: var(--text-primary) }
+        .hangs-datepicker .summary button:active { transform: scale(0.96) }
+        @media (prefers-reduced-motion: reduce) {
+          .hangs-datepicker *, .hangs-datepicker *::before, .hangs-datepicker *::after { transition-duration: 0.01ms !important; }
+        }
       `}</style>
 
       {/* Mode toggle */}
@@ -343,7 +364,7 @@ export default function DatePicker({ value, onChange }: Props) {
         <button
           type="button"
           role="tab"
-          aria-pressed={value.mode === 'range'}
+          aria-selected={value.mode === 'range'}
           onClick={() => setMode('range')}
         >
           Range
@@ -351,7 +372,7 @@ export default function DatePicker({ value, onChange }: Props) {
         <button
           type="button"
           role="tab"
-          aria-pressed={value.mode === 'specific'}
+          aria-selected={value.mode === 'specific'}
           onClick={() => setMode('specific')}
         >
           Specific days

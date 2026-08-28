@@ -1,0 +1,152 @@
+/* Scoped field-notes styling for the create-hang planning flow. */
+.page {
+  width: min(100%, 38rem);
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page :is(h1, h2) { text-wrap: balance; }
+.page :is(p, label) { text-wrap: pretty; }
+.page :global(.btn-primary) { color: #fffaf1; background: var(--celebrate); box-shadow: 0 2px 0 rgba(86, 30, 10, .14); }
+.page :global(.btn-primary):hover { background: #e65520; box-shadow: 0 7px 18px rgba(120, 43, 13, .18); }
+.page :global(.input):focus { border-color: var(--celebrate); box-shadow: 0 0 0 3px color-mix(in srgb, var(--celebrate) 18%, transparent); }
+.page :global(button:focus-visible), .page :global(a:focus-visible), .page :global(input:focus-visible), .page :global(textarea:focus-visible) { outline-color: var(--celebrate); }
+.page :global(.chip) { min-height: 44px; }
+
+.crewNote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 58px;
+  padding: .75rem .9rem;
+  margin-bottom: 1.5rem;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--maybe-light) 64%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.crewNote a, .quietLink {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: .78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition-property: color, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(.2, 0, 0, 1);
+}
+.crewNote a:hover, .quietLink:hover { color: var(--text-primary); }
+.crewNote a:active, .quietLink:active { transform: scale(.96); }
+
+.progress {
+  display: grid;
+  gap: .6rem;
+  margin-bottom: 2rem;
+}
+.progressMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.progressTrack {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: .4rem;
+}
+.progressTrack i {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-light);
+}
+.progressTrack i[data-active='true'] { background: var(--accent); }
+
+.step { display: flex; flex-direction: column; gap: 1.5rem; }
+.stepIntro { display: grid; gap: .45rem; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--celebrate);
+}
+.stepIntro h2 { font-size: clamp(1.9rem, 7vw, 2.55rem); line-height: 1.04; letter-spacing: -.05em; }
+.stepIntro p { max-width: 34rem; color: var(--text-secondary); font-size: .95rem; line-height: 1.55; }
+
+.field { display: grid; gap: .5rem; }
+.field > label, .fieldLabel { font-family: var(--font-mono); font-size: .7rem; font-weight: 600; letter-spacing: .065em; text-transform: uppercase; color: var(--text-muted); }
+.fieldHelp { color: var(--text-muted); font-size: .78rem; line-height: 1.45; }
+
+.templateList { display: grid; gap: .65rem; }
+.template {
+  min-height: 88px;
+  padding: 1rem 1.1rem;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition-property: border-color, box-shadow, transform, background-color;
+  transition-duration: 170ms;
+  transition-timing-function: cubic-bezier(.2, 0, 0, 1);
+}
+.template:hover { border-color: var(--celebrate); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.template:active { transform: scale(.96); }
+.template strong { display: block; margin-bottom: .35rem; font-family: var(--font-display); font-size: 1rem; }
+.template span { display: block; color: var(--text-muted); font-size: .8rem; line-height: 1.45; }
+
+.choiceGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.choice {
+  min-height: 124px;
+  padding: .9rem;
+  text-align: left;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition-property: border-color, background-color, box-shadow, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(.2, 0, 0, 1);
+}
+.choice[aria-pressed='true'] { color: var(--text-primary); background: color-mix(in srgb, var(--maybe-light) 52%, var(--surface)); border-color: var(--celebrate); box-shadow: 0 0 0 2px color-mix(in srgb, var(--celebrate) 20%, transparent); }
+.choice:active { transform: scale(.96); }
+.choice svg { display: block; margin-bottom: .55rem; transform: translateY(-.5px); }
+.choice strong, .choice small { display: block; }
+.choice strong { font-family: var(--font-display); font-size: .9rem; color: var(--text-primary); }
+.choice small { margin-top: .22rem; font-size: .7rem; line-height: 1.4; color: var(--text-muted); }
+
+.actionRow { display: flex; gap: .75rem; padding-top: .25rem; }
+.actionRow > * { flex: 1; min-height: 48px; }
+.skip { align-self: center; min-height: 44px; padding: .5rem .75rem; color: var(--text-muted); background: transparent; border: 0; cursor: pointer; font-family: var(--font-mono); font-size: .72rem; font-weight: 600; letter-spacing: .04em; transition-property: color, transform; transition-duration: 160ms; }
+.skip:hover { color: var(--text-primary); }.skip:active { transform: scale(.96); }
+
+.review { overflow: hidden; padding: 1.25rem; background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
+.review :global(.label) { margin-top: 1.1rem; }
+.review :global(.label):first-child { margin-top: 0; }
+
+.quick { padding-top: .5rem; }
+
+@media (max-width: 390px) {
+  .page { padding-inline: 1rem; }
+  .choiceGrid { grid-template-columns: 1fr; }
+  .actionRow { flex-direction: column-reverse; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page *, .page *::before, .page *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

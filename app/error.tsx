@@ -1,64 +1,24 @@
-// App-wide error boundary — catches render crashes in any route that doesn't
-// have its own more-specific error.tsx. Shows a recoverable fallback instead
-// of Next.js's raw stack trace.
-"use client"
-import { useEffect } from "react"
+// App-wide recoverable error boundary for unexpected route rendering failures.
 
-export default function AppError({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string }
-  reset: () => void
-}) {
-  useEffect(() => {
-    console.error('[hangs] app crashed:', error)
-  }, [error])
+'use client'
+
+import { useEffect } from 'react'
+import Link from 'next/link'
+import styles from '@/app/product.module.css'
+
+export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => { console.error('[hangs] app crashed:', error) }, [error])
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', minHeight: '70vh', padding: '48px 24px',
-      textAlign: 'center', gap: 14,
-    }}>
-      <div style={{
-        width: 56, height: 56, borderRadius: '50%',
-        background: '#fef2f2', color: 'var(--error)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 28,
-      }}>
-        ⚠︎
+    <section className={styles.statusPage}>
+      <span className={styles.statusCode}>UNEXPECTED INTERRUPTION</span>
+      <h1 className={styles.title}>This screen couldn&apos;t load.</h1>
+      <p>Try loading it again. If it keeps happening, head home and send Ethan the reference below.</p>
+      {error.digest && <code className={styles.badge} style={{ width: 'fit-content', marginBottom: '1.5rem' }}>{error.digest}</code>}
+      <div className={styles.statusActions}>
+        <button type="button" onClick={reset} className="btn-primary">Try again</button>
+        <Link href="/" className="btn-secondary">Back to hangs</Link>
       </div>
-      <h1 style={{
-        fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800,
-        letterSpacing: '-0.03em', color: 'var(--text-primary)',
-      }}>
-        Something broke
-      </h1>
-      <p style={{ fontSize: 14, color: 'var(--text-secondary)', maxWidth: 340, lineHeight: 1.5 }}>
-        Sorry about that. Try again, or head home. If it keeps happening, send
-        Ethan the code below.
-      </p>
-      {error.digest && (
-        <code style={{
-          fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)',
-          background: 'var(--surface-dim)', padding: '4px 10px', borderRadius: 4,
-        }}>
-          {error.digest}
-        </code>
-      )}
-      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-        <button
-          onClick={reset}
-          className="btn-primary"
-          style={{ padding: '12px 22px', width: 'auto' }}
-        >
-          Try again
-        </button>
-        <a href="/" className="btn-secondary" style={{ padding: '12px 22px', textDecoration: 'none' }}>
-          Home
-        </a>
-      </div>
-    </div>
+    </section>
   )
 }

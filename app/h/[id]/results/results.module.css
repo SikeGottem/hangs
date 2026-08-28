@@ -1,0 +1,149 @@
+/* Field-notes visual system for the live results and confirmed-event route. */
+.results {
+  --paper: #f7f1e5;
+  --ink: #1d1a17;
+  --vermillion: #d94b32;
+  --utility: #167f91;
+  max-width: 900px !important;
+  margin: 0 auto !important;
+  padding: 28px 24px 128px !important;
+  color: var(--ink);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.results :global(.card) {
+  background: transparent !important;
+  border: 0 !important;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 17%, transparent) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.results :global(.label) {
+  color: var(--utility) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  letter-spacing: .12em !important;
+  text-transform: uppercase;
+}
+
+.results :global(.synthesis-card) {
+  position: relative;
+  padding: 28px !important;
+  background: var(--paper) !important;
+  border: 1px solid #d6c8b1 !important;
+  border-radius: 24px 24px 9px 24px !important;
+  box-shadow: 7px 7px 0 #ded1ba !important;
+}
+
+.results :global(.synthesis-card)::before {
+  content: "FIELD NOTE / 01";
+  position: absolute;
+  top: -12px;
+  left: 22px;
+  padding: 4px 8px;
+  background: var(--vermillion);
+  color: #fff8ed;
+  border-radius: 5px;
+  font: 800 9px/1 var(--font-mono);
+  letter-spacing: .1em;
+}
+
+.confirmed :global(.synthesis-card) {
+  background: #fff8ed !important;
+  border-color: var(--vermillion) !important;
+  box-shadow: 7px 7px 0 #efc5b9 !important;
+}
+
+.confirmed :global(.synthesis-card)::before { content: "CONFIRMED / SAVE THE DATE"; }
+
+.results :global(.synthesis-card button),
+.results :global(.sticky-bar button),
+.results :global(.btn-primary),
+.results :global(.btn-secondary),
+.results :global(.chip),
+.results button,
+.results a {
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease !important;
+}
+
+.results button:active, .results a:active { transform: scale(.96); }
+.results button { min-width: 32px; min-height: 32px; }
+.results button:focus-visible, .results a:focus-visible, .results input:focus-visible, .results textarea:focus-visible {
+  outline: 3px solid var(--utility) !important;
+  outline-offset: 3px;
+}
+
+.results :global(.btn-primary) {
+  min-height: 44px;
+  border-radius: 12px 12px 5px 12px !important;
+  background: var(--vermillion) !important;
+  color: #fffaf0 !important;
+  border-color: var(--vermillion) !important;
+  box-shadow: 3px 3px 0 #a83322;
+}
+.results :global(.btn-primary):hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 #a83322; }
+.results :global(.btn-secondary), .results :global(.chip) {
+  min-height: 44px;
+  border-radius: 12px 12px 5px 12px !important;
+  border-color: #b9ad9b !important;
+  background: #fffaf0 !important;
+}
+
+.sectionGroup { margin: 34px 0 0; }
+.sectionHeader {
+  width: 100%; min-height: 48px; padding: 0 2px 10px; display: flex; align-items: center;
+  justify-content: space-between; background: none; border: 0; border-bottom: 2px solid var(--ink);
+  color: var(--ink); cursor: pointer; font: 800 17px/1 var(--font-display); text-align: left;
+}
+.sectionHeader :global(.section-group-title)::before { content: "// "; color: var(--vermillion); font-family: var(--font-mono); font-size: .75em; }
+.sectionHeader :global(.section-group-chevron) { width: 18px; transition: transform 160ms ease; }
+.sectionHeader :global(.section-group-chevron-open) { transform: rotate(180deg); }
+.sectionGroup :global(.section-group-body) { overflow: hidden; transition: max-height 260ms ease, opacity 180ms ease; }
+
+.results :global(.section-group-body > .card:first-child) { margin-top: 0 !important; }
+.results :global(.section-group-body > .card) { padding: 22px 0 !important; margin: 0 !important; }
+.results :global(.section-group-body > div:not(.card)) { border-radius: 14px !important; }
+
+.results :global(.sticky-bar) {
+  width: min(900px, calc(100% - 24px)) !important;
+  left: 50% !important; transform: translateX(-50%);
+  bottom: 12px !important; padding: 10px !important;
+  background: rgba(255, 250, 240, .94) !important;
+  border: 1px solid #c9b99f !important; border-radius: 18px 18px 7px 18px !important;
+  box-shadow: 0 10px 30px rgba(39, 30, 22, .16) !important; backdrop-filter: blur(12px);
+}
+
+@media (min-width: 641px) {
+  .results { padding-bottom: 72px !important; }
+  .results :global(.sticky-bar) { display: none !important; }
+}
+
+.results :global([style*="fontFamily: 'var(--font-mono)'"]) { font-variant-numeric: tabular-nums; }
+.results :global(input), .results :global(textarea) { min-height: 44px; border-radius: 10px 10px 4px 10px !important; }
+.results :global(img) { border-radius: 12px 12px 4px 12px !important; }
+
+.confirmed > div:nth-of-type(2) h1 { font-size: clamp(34px, 6vw, 54px) !important; line-height: .96; letter-spacing: -.055em !important; }
+.planning > div:nth-of-type(2) h1 { font-size: clamp(32px, 5vw, 46px) !important; line-height: 1; }
+.hostToolbar { box-sizing: border-box; }
+
+.errorPage { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 48px 24px; text-align: center; color: var(--ink); }
+.errorTitle { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 800; letter-spacing: -.045em; }
+.errorCopy { max-width: 350px; margin: 0; color: var(--text-secondary); line-height: 1.55; }
+.errorActions { display: flex; gap: 10px; margin-top: 6px; }
+
+@media (max-width: 640px) {
+  .results { padding: 20px 16px 118px !important; }
+  .results button { min-width: 36px; min-height: 36px; }
+  .hostToolbar { margin-inline: -16px !important; }
+  .results :global(.synthesis-card) { padding: 24px 20px !important; border-radius: 20px 20px 6px 20px !important; }
+  .sectionGroup { margin-top: 28px; }
+  .results :global(.sticky-bar) { width: calc(100% - 20px) !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .results *, .sectionHeader :global(.section-group-chevron) { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

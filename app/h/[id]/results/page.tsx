@@ -3,22 +3,23 @@ import { useState, useEffect, useRef, use } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { showToast } from "@/components/Toast"
 import { showConfirm } from "@/components/ui/ConfirmModal"
-import { formatDeadline } from "@/lib/time"
+import { expandDateRange, formatCalendarDateTime, formatDeadline, isDateBeforeTodayInTimeZone, zonedCalendarDateTimeToUtc } from "@/lib/time"
 import DatePicker, { type DatePickerValue } from "@/components/DatePicker"
+import styles from "./results.module.css"
 
 // ── Section group component (Miller's Law — chunk into ~3 groups) ──
 function SectionGroup({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="section-group">
-      <div className="section-group-header" onClick={() => setOpen(!open)}>
+    <section className={styles.sectionGroup}>
+      <button className={styles.sectionHeader} onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="section-group-title">{title}</span>
         <svg className={`section-group-chevron ${open ? 'section-group-chevron-open' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </div>
+      </button>
       <div className={`section-group-body ${open ? '' : 'section-group-collapsed'}`} style={open ? { maxHeight: 5000, opacity: 1 } : undefined}>
         {children}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -30,6 +31,7 @@ function isOutdoor(name: string) {
 }
 
 function formatHour(h: number) {
+  if (h === 0) return "12am"
   if (h < 12) return h + "am"
   if (h === 12) return "12pm"
   return (h - 12) + "pm"
@@ -262,16 +264,52 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const responded = participants.filter((p: any) => p.hasResponded)
   const missing = participants.filter((p: any) => !p.hasResponded)
   const recommendedActivity = sortedActivities.find((a: any) => synthesis?.recommendedActivity?.name === a.name)
+  const hasConfirmedPlan = !!hang.confirmed_date
+  const isConfirmed = hang.status === 'confirmed' && !!hang.confirmed_date
+  const planDate = isConfirmed ? hang.confirmed_date : synthesis?.recommendedTime?.date
+  const planHour = isConfirmed ? (hang.confirmed_hour ?? 12) : synthesis?.recommendedTime?.hour
+  const planTimeDisplay = isConfirmed
+    ? formatCalendarDateTime(planDate, planHour)
+    : synthesis?.recommendedTime?.display || ''
+  const planActivityName = isConfirmed
+    ? (hang.confirmed_activity || synthesis?.recommendedActivity?.name || '')
+    : synthesis?.recommendedActivity?.name || ''
+  const planActivity = sortedActivities.find((activity: any) => activity.name === planActivityName)
+    || (isConfirmed ? undefined : recommendedActivity)
+  const planSlotRows = planDate && planHour != null
+    ? (data.availability || []).filter((row: any) => row.date === planDate && Number(row.hour) === Number(planHour))
+    : []
+  const planAttendeeIds = new Set(
+    planSlotRows
+      .filter((row: any) => row.status === 'free' || row.status === 'maybe')
+      .map((row: any) => row.participant_id),
+  )
+  const planSlotStats = isConfirmed
+    ? {
+        freeCount: planSlotRows.filter((row: any) => row.status === 'free').length,
+        maybeCount: planSlotRows.filter((row: any) => row.status === 'maybe').length,
+        attendeeCount: planAttendeeIds.size,
+        absentNames: responded.filter((participant: any) => !planAttendeeIds.has(participant.id)).map((participant: any) => participant.name),
+      }
+    : synthesis?.recommendedTime
+  const totalParticipantCount = synthesis?.totalParticipants ?? participants.length
+  const respondedParticipantCount = synthesis?.respondedCount ?? responded.length
+  const responseConfidence = synthesis?.confidence
+    ?? (respondedParticipantCount === totalParticipantCount && totalParticipantCount > 0
+      ? 'high'
+      : respondedParticipantCount >= Math.ceil(totalParticipantCount / 2)
+        ? 'medium'
+        : 'low')
   const hangDate = hang.confirmed_date || hang.date_range_end
-  const isPast = hangDate && new Date(hangDate + 'T23:59:59') < new Date()
+  const isPast = isDateBeforeTodayInTimeZone(hangDate, 'Australia/Sydney')
   const mapsUrl = hang.location ? (hang.location.startsWith('http') ? hang.location : `https://maps.google.com/?q=${encodeURIComponent(hang.location)}`) : null
 
   // Countdown
   let countdown = ''
   if (hang.confirmed_date && !isPast) {
-    const target = new Date(`${hang.confirmed_date}T${String(hang.confirmed_hour || 12).padStart(2, '0')}:00:00`)
+    const target = zonedCalendarDateTimeToUtc(hang.confirmed_date, hang.confirmed_hour ?? 12, 'Australia/Sydney')
     const now = new Date()
-    const diff = target.getTime() - now.getTime()
+    const diff = target ? target.getTime() - now.getTime() : 0
     if (diff > 0) {
       const days = Math.floor(diff / 86400000)
       const hours = Math.floor((diff % 86400000) / 3600000)
@@ -332,7 +370,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       const d = new Date(hang.confirmed_date + 'T00:00:00')
       const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]
       const monthName = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]
-      const hour = hang.confirmed_hour || 12
+      const hour = hang.confirmed_hour ?? 12
       const timeStr = hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`
       lines.push(`📅 ${hang.name}`)
       lines.push(`🕒 ${dayName} ${d.getDate()} ${monthName}, ${timeStr}`)
@@ -628,11 +666,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     const oldDates =
       hang.date_mode === 'specific' && hang.selected_dates
         ? (JSON.parse(hang.selected_dates) as string[])
-        : generateDateRange(hang.date_range_start, hang.date_range_end)
+        : expandDateRange(hang.date_range_start, hang.date_range_end)
     const newDates =
       draft.mode === 'specific'
         ? [...(draft.dates || [])].sort()
-        : generateDateRange(draft.start!, draft.end!)
+        : expandDateRange(draft.start!, draft.end!)
     const newSet = new Set(newDates)
     const oldSet = new Set(oldDates)
     const removed = oldDates.filter(d => !newSet.has(d))
@@ -758,11 +796,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   // Produces a clean plain-text summary the creator can screenshot/paste into
   // a group chat. Falls back to clipboard when native share isn't available.
   const sharePlan = async () => {
-    if (!synthesis) return
+    if (!isConfirmed && !synthesis) return
     const lines: string[] = []
     lines.push(`📍 ${hang.name}`)
-    lines.push(`🕰  ${synthesis.recommendedTime.display}`)
-    if (synthesis.recommendedActivity?.name) lines.push(`🎯 ${synthesis.recommendedActivity.name}`)
+    lines.push(`🕰  ${planTimeDisplay}`)
+    if (planActivityName) lines.push(`🎯 ${planActivityName}`)
     if (hang.location) lines.push(`📌 ${hang.location}`)
     if (commitment) {
       const parts: string[] = []
@@ -814,7 +852,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const dates = hang
     ? (isSpecificMode && hang.selected_dates
       ? (JSON.parse(hang.selected_dates) as string[]).sort()
-      : generateDateRange(hang.date_range_start, hang.date_range_end))
+      : expandDateRange(hang.date_range_start, hang.date_range_end))
     : []
   const HOURS = Array.from({ length: 15 }, (_, i) => i + 8)
 
@@ -827,13 +865,13 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const isCancelled = !!hang.cancelled_at
 
   return (
-    <div style={{ maxWidth: 560, margin: '0 auto', padding: '16px 20px 100px' }}>
+    <div className={`${styles.results} ${hang.status === 'confirmed' ? styles.confirmed : styles.planning}`}>
       {/* Confetti */}
       {showConfetti && <Confetti />}
 
       {/* ═══════════ Admin header band (creator only) ═══════════ */}
       {isCreator && (
-        <div style={{
+      <div className={styles.hostToolbar} style={{
           margin: '-16px -20px 20px',
           padding: '14px 20px',
           background: 'var(--maybe-light)',
@@ -1085,23 +1123,21 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         </button>
       )}
 
-      {/* Synthesis card — the "second share moment".
+      {/* Plan card — the "second share moment".
           This is what someone screenshots and pastes into the group chat.
           Treat it like a party invite, not a dashboard card: bigger time,
           clearer activity line, commitment chips at the top so the social
           proof is legible at a glance, and a share affordance up front.
-          Guard: only show the populated card when synthesiseFromData returned
-          a non-null result AND someone has actually responded (respondedCount>0).
-          synthesiseFromData already returns null on zero availability rows;
-          this double-guard also catches the edge case where the server omits it. */}
-      {synthesis && synthesis.respondedCount > 0 ? (
+          A confirmed plan remains authoritative even if availability is later
+          removed and synthesis can no longer produce a recommendation. */}
+      {isConfirmed || (synthesis && synthesis.respondedCount > 0) ? (
         <div className="synthesis-card" style={{ marginBottom: 24 }}>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: 10, marginBottom: 14, flexWrap: 'wrap',
           }}>
             <div className="label" style={{ color: 'var(--accent)', margin: 0 }}>
-              The plan so far
+              {isConfirmed ? 'The locked plan' : 'The plan so far'}
             </div>
             <button
               onClick={sharePlan}
@@ -1130,14 +1166,14 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             letterSpacing: '-0.028em', lineHeight: 1.1,
             color: 'var(--text-primary)',
           }}>
-            {synthesis.recommendedTime.display}
+            {planTimeDisplay}
           </div>
-          {synthesis.recommendedActivity && (
+          {planActivityName && (
             <div style={{
               fontSize: 19, color: 'var(--text-secondary)', fontWeight: 600,
               marginTop: 6, letterSpacing: '-0.01em',
             }}>
-              {synthesis.recommendedActivity.name}
+              {planActivityName}
             </div>
           )}
           {/* Commitment chips — pulled up high so social proof is visible
@@ -1181,9 +1217,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           )}
 
           {/* Cost estimate */}
-          {recommendedActivity?.cost_estimate && (
+          {planActivity?.cost_estimate && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, padding: '6px 12px', background: 'var(--maybe-light)', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-mono)', fontSize: 13, color: '#8a6d10' }}>
-              {recommendedActivity.cost_estimate}
+              {planActivity.cost_estimate}
             </div>
           )}
 
@@ -1216,23 +1252,25 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           )}
 
           {/* Conflict: who can't make it */}
-          {synthesis.recommendedTime.absentNames?.length > 0 && (
+          {planSlotStats?.absentNames?.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 13, color: 'var(--text-muted)' }}>
-              Can't make it: {synthesis.recommendedTime.absentNames.join(', ')}
+              Can't make it: {planSlotStats.absentNames.join(', ')}
             </div>
           )}
 
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 12 }}>
-            {synthesis.recommendedTime.freeCount} free
-            {synthesis.recommendedTime.maybeCount > 0 && ` / ${synthesis.recommendedTime.maybeCount} maybe`}
-            {' / '}{synthesis.recommendedTime.attendeeCount} of {synthesis.totalParticipants} can make it
-          </div>
+          {planSlotStats && (
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 12 }}>
+              {planSlotStats.freeCount} free
+              {planSlotStats.maybeCount > 0 && ` / ${planSlotStats.maybeCount} maybe`}
+              {' / '}{planSlotStats.attendeeCount} of {totalParticipantCount} can make it
+            </div>
+          )}
 
           {/* Response rate — shows how complete the picture is, not a subjective confidence score */}
           <div style={{ marginTop: 6 }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Response rate: </span>
-            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: synthesis.confidence === 'high' ? 'var(--free)' : synthesis.confidence === 'medium' ? '#B8940F' : 'var(--text-muted)' }}>
-              {synthesis.respondedCount}/{synthesis.totalParticipants}
+            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: responseConfidence === 'high' ? 'var(--free)' : responseConfidence === 'medium' ? '#B8940F' : 'var(--text-muted)' }}>
+              {respondedParticipantCount}/{totalParticipantCount}
             </span>
           </div>
 
@@ -1257,7 +1295,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               the initiative to organise is the decider. This fixes the "second
               round trip" friction that made the least-engaged friend never
               return to cast a confirm vote. */}
-          {hang.status !== "confirmed" && !isCancelled && (
+          {synthesis && hang.status !== "confirmed" && !isCancelled && (
             <div style={{ marginTop: 20 }}>
               {isCreator ? (
                 <>
@@ -1413,7 +1451,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                               fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14,
                               color: 'var(--text-primary)',
                               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                              transition: 'all 0.15s ease',
+                              transition: 'transform 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease',
                             }}
                             onMouseEnter={e => { e.currentTarget.style.borderColor = r.color; e.currentTarget.style.transform = 'translateY(-1px)' }}
                             onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-light)'; e.currentTarget.style.transform = 'translateY(0)' }}
@@ -1842,12 +1880,17 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {a.cost_estimate && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)' }}>{a.cost_estimate}</span>}
-                    {isCreator && (
+                    {isCreator && !(hasConfirmedPlan && a.name === hang.confirmed_activity) && (
                       <button
                         onClick={() => removeActivity(a.id, a.name, hasVotes)}
                         title="Remove activity"
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, padding: 0, lineHeight: 1 }}
                       >×</button>
+                    )}
+                    {hasConfirmedPlan && a.name === hang.confirmed_activity && (
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                        locked
+                      </span>
                     )}
                   </span>
                 </div>
@@ -2343,9 +2386,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* ── Sticky CTA bar (Fitts's Law — always reachable) ── */}
-      {synthesis && (
+      {!isCancelled && (isConfirmed || synthesis) && (
         <div className="sticky-bar">
-          {hang.status !== 'confirmed' ? (
+          {!isConfirmed && synthesis ? (
             isCreator ? (
               <button
                 onClick={() => forceConfirmSlot(synthesis.recommendedTime.date, synthesis.recommendedTime.hour)}
@@ -2470,7 +2513,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             </div>
 
             {/* Dates — add or change when the hang is open */}
-            <div style={{ marginBottom: 16, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
+            {!hasConfirmedPlan ? (
+              <div style={{ marginBottom: 16, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
               <label className="label" style={{ display: 'block', marginBottom: 6 }}>Dates</label>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
                 Add more days or change the window. Adding dates keeps everyone&apos;s existing availability.
@@ -2506,27 +2550,37 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                   </button>
                 </div>
               )}
-            </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 16, padding: '14px 0 0', borderTop: '1px solid var(--border-light)' }}>
+                <div className="label" style={{ marginBottom: 6 }}>Dates locked</div>
+                <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+                  Unlock the plan from the plan card before changing its dates.
+                </p>
+              </div>
+            )}
 
             {/* Lock/unlock toggle */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
               <div className="label" style={{ marginBottom: 4 }}>Response state</div>
-              {!isLocked ? (
-                <button
-                  onClick={() => settingsAction('lock')}
-                  className="btn-secondary"
-                  style={{ width: '100%', fontSize: 13 }}
-                >
-                  Lock responses (freeze the grid)
-                </button>
-              ) : (
-                <button
-                  onClick={() => settingsAction('unlock')}
-                  className="btn-secondary"
-                  style={{ width: '100%', fontSize: 13, color: 'var(--success)', borderColor: 'var(--success)' }}
-                >
-                  Unlock responses
-                </button>
+              {!hasConfirmedPlan && (
+                !isLocked ? (
+                  <button
+                    onClick={() => settingsAction('lock')}
+                    className="btn-secondary"
+                    style={{ width: '100%', fontSize: 13 }}
+                  >
+                    Lock responses (freeze the grid)
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => settingsAction('unlock')}
+                    className="btn-secondary"
+                    style={{ width: '100%', fontSize: 13, color: 'var(--success)', borderColor: 'var(--success)' }}
+                  >
+                    Unlock responses
+                  </button>
+                )
               )}
               {!isCancelled ? (
                 <button
@@ -2562,16 +2616,6 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       )}
     </div>
   )
-}
-
-// ── Helpers ──
-
-function generateDateRange(start: string, end: string): string[] {
-  const dates: string[] = []
-  const d = new Date(start + "T00:00:00")
-  const e = new Date(end + "T00:00:00")
-  while (d <= e) { dates.push(d.toISOString().split("T")[0]); d.setDate(d.getDate() + 1) }
-  return dates.slice(0, 31) // allow up to 31 days; was capped at 7
 }
 
 function weatherIcon(code: number): string {
@@ -2645,7 +2689,7 @@ function VoteButtons({ myVote, onVote }: { myVote: VoteValue | null | undefined;
               color: active ? o.color : 'var(--text-muted)',
               border: `1.5px solid ${active ? o.border : 'var(--border-light)'}`,
               whiteSpace: 'nowrap',
-              transition: 'all 0.1s ease',
+              transition: 'background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease',
             }}
           >
             {o.label}

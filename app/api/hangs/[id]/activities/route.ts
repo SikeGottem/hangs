@@ -61,10 +61,15 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const db = getDb()
     // Verify activity belongs to this hang, then cascade delete
     const actRes = await db.execute({
-      sql: 'SELECT id FROM activities WHERE id = ? AND hang_id = ?',
+      sql: `SELECT a.id, a.name, h.confirmed_activity
+            FROM activities a JOIN hangs h ON h.id = a.hang_id
+            WHERE a.id = ? AND a.hang_id = ?`,
       args: [activityId, id],
     })
     if (!actRes.rows[0]) return notFound('Activity not found')
+    if (actRes.rows[0].name === actRes.rows[0].confirmed_activity) {
+      return badRequest('Unlock the plan before removing its confirmed activity')
+    }
 
     await db.batch(
       [

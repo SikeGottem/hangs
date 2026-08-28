@@ -1,5 +1,6 @@
 import { createClient, type Client } from '@libsql/client'
 import { randomBytes } from 'crypto'
+import { expandDateRange } from './time'
 
 let _client: Client | null = null
 
@@ -356,14 +357,32 @@ export function genId(len = 8): string {
 export async function getHangState(hangId: string) {
   const db = getDb()
   const res = await db.execute({
-    sql: 'SELECT id, locked_at, cancelled_at FROM hangs WHERE id = ?',
+    sql: `SELECT id, status, locked_at, cancelled_at, date_mode,
+                 date_range_start, date_range_end, selected_dates
+          FROM hangs WHERE id = ?`,
     args: [hangId],
   })
   if (!res.rows[0]) return { exists: false as const }
+  const row = res.rows[0]
+  let validDates: string[] = []
+  if (row.date_mode === 'specific') {
+    try {
+      const parsed: unknown = JSON.parse((row.selected_dates as string | null) || '[]')
+      if (Array.isArray(parsed)) {
+        validDates = [...new Set(parsed.filter((date: unknown): date is string => typeof date === 'string'))].sort()
+      }
+    } catch {
+      validDates = []
+    }
+  } else {
+    validDates = expandDateRange(row.date_range_start as string, row.date_range_end as string)
+  }
   return {
     exists: true as const,
-    locked: !!res.rows[0].locked_at,
-    cancelled: !!res.rows[0].cancelled_at,
+    status: row.status as string,
+    locked: !!row.locked_at || row.status === 'confirmed',
+    cancelled: !!row.cancelled_at,
+    validDates,
   }
 }
 

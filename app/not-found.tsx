@@ -1,26 +1,18 @@
+// Global 404 fallback for Hangs routes that cannot be found.
+
 import Link from 'next/link'
+import styles from '@/app/product.module.css'
 
 export default function NotFound() {
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      minHeight: '60vh', padding: '48px 24px', textAlign: 'center',
-    }}>
-      <div style={{
-        width: 56, height: 56, borderRadius: '50%', background: 'var(--surface-dim)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        marginBottom: 20, fontSize: 24,
-      }}>?</div>
-      <h1 style={{
-        fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 800,
-        letterSpacing: '-0.03em', marginBottom: 8,
-      }}>Hang not found</h1>
-      <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: 24 }}>
-        This link might be broken or the hangout was removed.
-      </p>
-      <Link href="/" className="btn-primary" style={{ maxWidth: 200 }}>
-        Back to home
-      </Link>
-    </div>
+    <section className={styles.statusPage}>
+      <span className={styles.statusCode}>404 · NOT FOUND</span>
+      <h1 className={styles.title}>That page isn&apos;t here.</h1>
+      <p>The link may be incomplete, or the hangout may have been removed. Start a new plan or head back to the home page.</p>
+      <div className={styles.statusActions}>
+        <Link href="/" className="btn-primary">Back to hangs</Link>
+        <Link href="/create" className="btn-secondary">Plan a hang</Link>
+      </div>
+    </section>
   )
 }

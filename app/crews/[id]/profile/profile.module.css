@@ -1,0 +1,24 @@
+/* Profile route details: reusable-defaults hierarchy and the touch-friendly availability matrix. */
+.header { margin: 0.85rem 0 2.75rem; }
+.section { display: grid; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+.availabilityTitle { display: grid; gap: 0.75rem; }
+.availabilityTitle p { max-width: 34rem; color: var(--text-secondary); font-size: 0.88rem; line-height: 1.55; }
+.availabilityTitle strong { color: var(--text-primary); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.5rem; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.legend span::before { width: 0.7rem; height: 0.7rem; content: ''; border-radius: 2px; background: var(--busy); }
+.legend span[data-state='free']::before { background: var(--free); }
+.legend span[data-state='maybe']::before { background: var(--maybe); }
+.gridWrap { width: 100%; overflow-x: auto; padding-bottom: 0.35rem; -webkit-overflow-scrolling: touch; }
+.grid { min-width: 31rem; display: grid; grid-template-columns: 2.2rem repeat(7, minmax(3.8rem, 1fr)); gap: 0.28rem; }
+.gridRow { display: contents; }
+.day, .hour { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.62rem; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.day { min-height: 1.8rem; display: grid; place-items: center; text-transform: uppercase; }
+.hour { display: flex; align-items: center; justify-content: flex-end; padding-right: 0.25rem; }
+.cell { min-height: 44px; border: 1px solid var(--border-light); border-radius: var(--radius-xs); background: var(--busy); cursor: pointer; transition-property: transform, background-color, border-color, box-shadow; transition-duration: 140ms; }
+.cell:hover { border-color: var(--text-muted); }
+.cell:active { transform: scale(0.96); }
+.cell[data-state='free'] { background: var(--free); border-color: #2aa359; }
+.cell[data-state='maybe'] { background: var(--maybe); border-color: #daa816; }
+.cell:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+@media (max-width: 34rem) { .grid { min-width: 29.5rem; grid-template-columns: 2rem repeat(7, minmax(3.55rem, 1fr)); } .availabilityTitle { gap: 0.95rem; } }

@@ -1,0 +1,35 @@
+/* Route-local field-notes workspace treatment for an individual crew. */
+.workspace { max-width: 820px; }
+.utilityBar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; }
+.cover { position:relative; isolation:isolate; min-height:214px; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius-xl); background:var(--surface); box-shadow:var(--shadow-sm); }
+.coverWash { position:absolute; z-index:-1; inset:0 0 auto; height:5.6rem; opacity:.34; }
+.cover::after { content:''; position:absolute; right:-4rem; bottom:-7rem; width:17rem; height:17rem; border:1px solid rgba(25,24,21,.12); border-radius:50%; box-shadow:0 0 0 24px rgba(255,253,248,.16),0 0 0 48px rgba(255,253,248,.1); z-index:-1; }
+.coverContent { min-height:214px; padding:clamp(1.35rem,4vw,2.25rem); display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; }
+.crewIdentity { display:flex; align-items:flex-end; gap:1rem; min-width:0; }
+.crewMark { width:4rem; height:4rem; flex:0 0 auto; display:grid; place-items:center; border:1px solid rgba(25,24,21,.12); border-radius:var(--radius-lg); font-size:2rem; box-shadow:var(--shadow-sm); }
+.crewKicker,.execDeskHeading { color:var(--text-muted); font-family:var(--font-mono); font-size:.68rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; }
+.crewTitle { margin-top:.25rem; font-family:var(--font-display); font-size:clamp(2.2rem,7vw,4rem); font-weight:800; letter-spacing:-.06em; line-height:.95; }
+.crewDescription { max-width:38rem; margin-top:.65rem; color:var(--text-secondary); line-height:1.5; }
+.profileLink { min-height:44px; flex:0 0 auto; display:inline-flex; align-items:center; padding:.65rem .85rem; border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); background:rgba(255,253,248,.75); font-size:.83rem; font-weight:700; text-decoration:none; transition:transform 160ms,background-color 160ms; }
+.profileLink:hover { background:var(--surface-dim); }.profileLink:active { transform:scale(.96); }
+.profileNotice { display:block; margin-top:1rem; padding:1rem; border:1px solid #e2c34f; border-radius:var(--radius-md); color:var(--text-primary); background:var(--maybe-light); font-size:.9rem; line-height:1.5; text-decoration:none; }
+.planAction { width:100%; min-height:56px; margin-top:1.25rem; display:flex !important; align-items:center; justify-content:center; gap:.6rem; font-size:1rem !important; text-decoration:none; }
+.stats { display:grid; grid-template-columns:repeat(3,1fr); margin-top:1.75rem; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.workspace :global(.label) { color:var(--text-muted); font-family:var(--font-mono); font-size:.7rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; }
+.workspace :global(.label) + * { border-top:1px solid var(--border); }
+.workspace button { min-height:44px; transition-property:transform,color,background-color,border-color,opacity; transition-duration:160ms; }
+.workspace button:active:not(:disabled) { transform:scale(.96); }
+.workspace button:focus-visible,.workspace a:focus-visible,.workspace input:focus-visible,.workspace textarea:focus-visible,.workspace select:focus-visible { outline:3px solid rgba(246,201,69,.7); outline-offset:2px; }
+.stats > div { padding:1.1rem .5rem !important; background:transparent !important; border:0 !important; border-radius:0 !important; }
+.stats > div + div { border-left:1px solid var(--border-light) !important; }
+.stats > div > div:nth-child(2) { font-variant-numeric:tabular-nums; }
+.inviteToggle { min-height:44px; color:var(--utility) !important; background:none !important; border:0 !important; font-weight:700 !important; }
+.execDesk { margin-top:3.5rem; padding:1.5rem; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface-dim); }
+.execDeskHeading { display:flex; justify-content:space-between; padding-bottom:1rem; border-bottom:1px solid var(--border); }.execDeskHeading span { color:var(--utility); }
+.execDesk > div { margin-top:1.25rem !important; }.execDesk :global(.label) { margin-bottom:.7rem !important; }
+.errorState { text-align:center; }.errorMark { width:3.25rem; height:3.25rem; margin-bottom:1.25rem; display:grid; place-items:center; border-radius:50%; color:var(--signal); background:var(--signal-light); font-size:2rem; }
+.loading { min-height:45dvh; display:grid; place-items:center; color:var(--text-muted); font-family:var(--font-mono); font-size:.78rem; letter-spacing:.06em; }
+.workspace :global(.btn-primary) { min-height:44px; }
+.workspace :global(a[style*='borderBottom']),.workspace :global(div[style*='borderBottom']) { border-bottom-color:var(--border) !important; }
+@media (max-width:640px) { .workspace { width:min(100% - 2rem,820px); }.coverContent { min-height:230px; align-items:flex-start; flex-direction:column; }.crewIdentity { align-items:center; }.profileLink { width:100%; justify-content:center; }.stats > div { padding:.9rem .25rem !important; }.execDesk { margin-inline:-.15rem; padding:1rem; } }
+@media (prefers-reduced-motion:reduce) { .workspace *, .workspace *::before, .workspace *::after { transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; } }

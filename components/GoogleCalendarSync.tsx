@@ -170,7 +170,7 @@ export default function GoogleCalendarSync({
           fontSize: 13,
           fontWeight: 700,
           color: state === 'done' ? '#1a7a3a' : state === 'error' ? 'var(--error)' : 'var(--text-primary)',
-          transition: 'all 0.15s ease',
+          transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease',
           opacity: state === 'loading' ? 0.7 : 1,
         }}
       >
@@ -188,7 +188,7 @@ export default function GoogleCalendarSync({
         color: 'var(--text-muted)',
         lineHeight: 1.4,
       }}>
-        Read-only · we only see when you're busy, never what you're doing
+        {err || "Read-only · we only see when you're busy, never what you're doing"}
       </div>
     </div>
   )

@@ -6,20 +6,7 @@ import { getDb, ensureSchema, synthesiseFromData } from '@/lib/db'
 import { requireCreator, requireUser } from '@/lib/auth'
 import { EditHangSchema, parseBody } from '@/lib/schemas'
 import { serverError, badRequest, unauthorized, notFound } from '@/lib/errors'
-
-// Expand a YYYY-MM-DD start..end (inclusive) into a list of dates, capped at 31.
-// Parsed + incremented in UTC so the round-trip through toISOString() never
-// shifts a day (a local-tz parse here drops every date back one day in AEST).
-function expandDateRange(start: string, end: string): string[] {
-  const dates: string[] = []
-  const d = new Date(start + 'T00:00:00Z')
-  const e = new Date(end + 'T00:00:00Z')
-  while (d <= e && dates.length < 31) {
-    dates.push(d.toISOString().split('T')[0])
-    d.setUTCDate(d.getUTCDate() + 1)
-  }
-  return dates
-}
+import { expandDateRange } from '@/lib/time'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -88,7 +75,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       coverEmoji: string | null
       publicInviteToken: string | null
     } | null = null
-    const crewId = (hang as any).crew_id as string | null
+    const crewId = hang.crew_id as string | null
     if (crewId) {
       const crewRes = await db.execute({
         sql: 'SELECT id, name, slug, cover_color, cover_emoji, public_invite_token FROM crews WHERE id = ?',
@@ -138,7 +125,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     // Look up the hang + verify caller is the creator
     const hangRes = await db.execute({
-      sql: 'SELECT creator_id FROM hangs WHERE id = ?',
+      sql: 'SELECT creator_id, status, confirmed_date FROM hangs WHERE id = ?',
       args: [id],
     })
     if (!hangRes.rows[0]) return notFound('Hang not found')
@@ -150,6 +137,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const parsed = parseBody(raw, EditHangSchema)
     if ('error' in parsed) return badRequest(parsed.error)
     const body = parsed.data
+    if (body.dateMode !== undefined && hangRes.rows[0].confirmed_date) {
+      return badRequest('Unlock the plan before changing dates')
+    }
 
     // Build dynamic UPDATE statement with only the provided fields
     const updates: string[] = []
@@ -183,7 +173,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         if (!body.selectedDates || body.selectedDates.length === 0) {
           return badRequest('Select at least one date')
         }
-        const sorted = [...body.selectedDates].sort()
+        const sorted = [...new Set(body.selectedDates)].sort()
         pushField('date_mode', 'specific')
         pushField('date_range_start', sorted[0])
         pushField('date_range_end', sorted[sorted.length - 1])
@@ -203,6 +193,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         updates.push('selected_dates = ?')
         args.push(null)
         newValidDates = expandDateRange(body.dateRangeStart, body.dateRangeEnd)
+        if (newValidDates.length === 0) return badRequest('Invalid date range')
+        if (newValidDates.at(-1) !== body.dateRangeEnd) {
+          return badRequest('Date range must be 31 days or less')
+        }
       }
     }
 

@@ -25,6 +25,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!state.exists) return notFound()
     if (state.cancelled) return forbidden('This hang was cancelled')
     if (state.locked) return forbidden('Responses are locked for this hang')
+    const allowedDates = new Set(state.validDates)
+    if (slots.some(slot => !allowedDates.has(slot.date))) {
+      return badRequest('Availability includes a date outside this hang')
+    }
 
     // One batched write: availability + commitment + participant profile fields.
     // All three are submitted together in the final step of the respond flow.

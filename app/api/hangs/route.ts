@@ -6,6 +6,7 @@ import { CreateHangSchema, parseBody } from '@/lib/schemas'
 import { serverError, badRequest, forbidden } from '@/lib/errors'
 import { notifyCrewMembers } from '@/lib/notifications'
 import { logEvent } from '@/lib/analytics'
+import { expandDateRange } from '@/lib/time'
 
 export async function POST(req: Request) {
   try {
@@ -41,6 +42,9 @@ export async function POST(req: Request) {
       if (!body.dateRangeStart || !body.dateRangeEnd) {
         return badRequest('Missing date range')
       }
+      const dates = expandDateRange(body.dateRangeStart, body.dateRangeEnd)
+      if (dates.length === 0) return badRequest('Invalid date range')
+      if (dates.at(-1) !== body.dateRangeEnd) return badRequest('Date range must be 31 days or less')
     }
 
     const db = getDb()
@@ -49,7 +53,7 @@ export async function POST(req: Request) {
     const hangId = genId()
     const creatorId = genId()
 
-    const sortedSelected = body.selectedDates ? [...body.selectedDates].sort() : undefined
+    const sortedSelected = body.selectedDates ? [...new Set(body.selectedDates)].sort() : undefined
     const start = body.dateMode === 'specific' ? sortedSelected![0] : body.dateRangeStart!
     const end = body.dateMode === 'specific' ? sortedSelected![sortedSelected!.length - 1] : body.dateRangeEnd!
 

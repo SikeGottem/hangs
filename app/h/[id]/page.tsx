@@ -2,27 +2,17 @@
 import { useState, useEffect, useRef, useCallback, use } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
-import { formatDeadline } from "@/lib/time"
+import { expandDateRange, formatDeadline } from "@/lib/time"
 import { OnboardingHero, InlineTip } from "@/components/FirstVisitCoach"
 import GoogleCalendarSync from "@/components/GoogleCalendarSync"
 import { showToast } from "@/components/Toast"
+import styles from "./respond.module.css"
 
 const stepAnim = {
   initial: { opacity: 0, x: 30 },
   animate: { opacity: 1, x: 0 },
   exit: { opacity: 0, x: -30 },
   transition: { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number] },
-}
-
-function generateDateRange(start: string, end: string): string[] {
-  const dates: string[] = []
-  const d = new Date(start + "T00:00:00")
-  const e = new Date(end + "T00:00:00")
-  while (d <= e) {
-    dates.push(d.toISOString().split("T")[0])
-    d.setDate(d.getDate() + 1)
-  }
-  return dates.slice(0, 31) // allow up to 31 days; was capped at 7
 }
 
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 8)
@@ -298,9 +288,31 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     }
   }
 
+  const offeredAvailabilityDates = (): string[] => {
+    if (!hang) return []
+    if (hang.hang.date_mode !== 'specific') {
+      return expandDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    }
+    try {
+      const dates: unknown = JSON.parse(hang.hang.selected_dates || '[]')
+      return Array.isArray(dates)
+        ? [...new Set(dates.filter((date: unknown): date is string => typeof date === 'string'))].sort()
+        : []
+    } catch {
+      return []
+    }
+  }
+
+  const activeAvailabilityDates = (): string[] => {
+    const offered = offeredAvailabilityDates()
+    const usesSpecificHourPicker = hang?.hang.date_mode === 'specific' && hang?.hang.time_granularity !== 'blocks'
+    if (!usesSpecificHourPicker) return offered
+    const chosen = new Set(freeDays)
+    return offered.filter(date => chosen.has(date))
+  }
+
   const markAllFree = () => {
-    if (!hang) return
-    const dates = generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const dates = activeAvailabilityDates()
     const allSlots: Record<string, string> = {}
     for (const d of dates) for (const h of HOURS) allSlots[`${d}|${h}`] = "free"
     setSlots(allSlots)
@@ -338,11 +350,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
     if (!hang) return
     const preset = PRESETS.find(p => p.key === presetKey)
     if (!preset) return
-    // Range mode: iterate the generated date range. Specific mode: iterate selected_dates.
-    const isSpecific = hang.hang.date_mode === 'specific'
-    const dateList = isSpecific
-      ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
-      : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const dateList = activeAvailabilityDates()
     const newSlots: Record<string, string> = { ...slots }
     for (const d of dateList) {
       const dateObj = new Date(d + 'T00:00:00')
@@ -374,10 +382,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
       if (!raw) return
       pattern = JSON.parse(raw)
     } catch { return }
-    const isSpecific = hang.hang.date_mode === 'specific'
-    const dateList = isSpecific
-      ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
-      : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const dateList = activeAvailabilityDates()
     const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
     const newSlots: Record<string, string> = { ...slots }
     for (const d of dateList) {
@@ -406,10 +411,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
   // the grid so "Use my usual" is always a clean rehydrate.
   const applyCrewShape = () => {
     if (!hang || !crewShape) return
-    const isSpecific = hang.hang.date_mode === 'specific'
-    const dateList = isSpecific
-      ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
-      : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    const dateList = activeAvailabilityDates()
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     const newSlots: Record<string, string> = {}
     for (const d of dateList) {
@@ -426,10 +428,11 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
   }
 
   const submitAvailability = async () => {
+    const allowedDates = new Set(activeAvailabilityDates())
     const slotArray = Object.entries(slots).map(([key, status]) => {
       const [date, hour] = key.split("|")
       return { date, hour: parseInt(hour), status }
-    }).filter(s => s.status !== "busy")
+    }).filter(s => s.status !== "busy" && allowedDates.has(s.date))
     const token = typeof window !== 'undefined' ? localStorage.getItem(`hangs_token_${id}`) || '' : ''
     await fetch(`/api/hangs/${id}/availability`, {
       method: "POST",
@@ -505,7 +508,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
   }
 
   if (loading) return (
-    <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px', textAlign: 'center' }}>
+    <div className={`${styles.page} ${styles.loading}`} style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px', textAlign: 'center' }}>
       <style>{`
         @keyframes hangs-skeleton-shimmer {
           0% { background-position: -400px 0 }
@@ -535,8 +538,8 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
       <div className="hangs-skel" style={{ height: 50, width: '100%' }} />
     </div>
   )
-  if (!hang) return (
-    <div style={{ textAlign: 'center', padding: '80px 24px', color: 'var(--text-muted)' }}>
+  if (!hang?.hang) return (
+    <div className={`${styles.page} ${styles.empty}`} style={{ textAlign: 'center', padding: '80px 24px', color: 'var(--text-muted)' }}>
       Hang not found
     </div>
   )
@@ -544,7 +547,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
   const isSpecificMode = hang.hang.date_mode === 'specific'
   const dates = isSpecificMode
     ? (hang.hang.selected_dates ? JSON.parse(hang.hang.selected_dates) as string[] : []).sort()
-    : generateDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
+    : expandDateRange(hang.hang.date_range_start, hang.hang.date_range_end)
 
   // [P0] Empty-grid guard: count non-busy slots so Next buttons can be disabled or soft-confirmed.
   const freeSlotCount = Object.values(slots).filter(s => s !== 'busy').length
@@ -553,7 +556,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
   const totalSteps = 3 + (hang.hang.ask_dietary ? 1 : 0) + (hang.hang.custom_question ? 1 : 0) + 1 // name, avail, vote, [dietary], [custom], commitment
 
   return (
-    <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px' }}>
+    <div className={styles.page} style={{ maxWidth: 520, margin: '0 auto', padding: '16px 20px 48px' }}>
       {/* Crew hero band — shown whenever the hang belongs to a crew.
           Signals "this is Climbing Soc, not a random link". */}
       {hang?.crew && (
@@ -830,7 +833,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                       border: `1px solid ${borderColor}`,
                       borderRadius: 'var(--radius-md)',
                       cursor: 'pointer',
-                      transition: 'all 0.15s ease',
+                      transitionProperty: 'transform, box-shadow', transitionDuration: '150ms', transitionTimingFunction: 'ease',
                       position: 'relative',
                     }}
                     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)' }}
@@ -982,7 +985,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                               cursor: 'pointer',
                               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
                               fontFamily: 'var(--font-display)',
-                              transition: 'all 0.12s ease',
+                              transitionProperty: 'background-color, border-color, color, transform', transitionDuration: '120ms', transitionTimingFunction: 'ease',
                               minHeight: 68,
                             }}
                           >
@@ -1098,7 +1101,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                   background: 'var(--surface)', color: 'var(--text-primary)',
                   border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
                   cursor: 'pointer', fontFamily: 'var(--font-display)',
-                  transition: 'all 0.15s ease',
+                  transitionProperty: 'background-color, border-color, color, transform', transitionDuration: '150ms', transitionTimingFunction: 'ease',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--maybe-light)'; e.currentTarget.style.borderColor = 'var(--accent)' }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)' }}
@@ -1348,7 +1351,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                         border: `2px solid ${isSelected ? 'var(--free)' : 'var(--border-light)'}`,
                         borderRadius: 'var(--radius-md)',
                         cursor: 'pointer',
-                        transition: 'all 0.15s ease',
+                        transitionProperty: 'background-color, border-color, transform', transitionDuration: '150ms', transitionTimingFunction: 'ease',
                       }}
                     >
                       <div style={{ textAlign: 'left' }}>
@@ -1456,14 +1459,14 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                       background: 'var(--surface)', color: 'var(--text-primary)',
                       border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
                       cursor: 'pointer', fontFamily: 'var(--font-display)',
-                      transition: 'all 0.15s ease',
+                      transitionProperty: 'background-color, border-color, color, transform', transitionDuration: '150ms', transitionTimingFunction: 'ease',
                     }}
                   >
                     <span style={{ display: 'inline-flex', lineHeight: 1 }}>{p.icon}</span> {p.label}
                   </button>
                 ))}
               </div>
-              {freeDays.sort().map(d => {
+              {[...freeDays].sort().map(d => {
                 const date = new Date(d + 'T00:00:00')
                 const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
                 const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1499,7 +1502,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                               background: status === 'free' ? 'var(--free-light)' : status === 'maybe' ? 'var(--maybe-light)' : 'var(--surface)',
                               color: status === 'free' ? '#1a7a3a' : status === 'maybe' ? '#8a6d10' : 'var(--text-muted)',
                               cursor: 'pointer',
-                              transition: 'all 0.1s ease',
+                              transitionProperty: 'background-color, border-color, color, transform', transitionDuration: '100ms', transitionTimingFunction: 'ease',
                             }}
                           >
                             {formatHour(h)}
@@ -1797,7 +1800,7 @@ export default function FriendPage({ params }: { params: Promise<{ id: string }>
                       border: selected ? 'none' : '1.5px solid var(--border)',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       color: '#fff', fontWeight: 900, fontSize: 13,
-                      transition: 'all 0.2s ease',
+                      transitionProperty: 'background-color, border-color, color, transform', transitionDuration: '200ms', transitionTimingFunction: 'ease',
                       flexShrink: 0,
                     }}
                   >

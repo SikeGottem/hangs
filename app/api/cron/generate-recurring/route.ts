@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server'
 import { getDb, ensureSchema, genId } from '@/lib/db'
 import { signParticipantToken } from '@/lib/auth'
 import { serverError, unauthorized } from '@/lib/errors'
+import { addCalendarDays, calendarDateInTimeZone, calendarDayOfWeek } from '@/lib/time'
 
 const DOW_INDEX: Record<string, number> = {
   sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
@@ -24,11 +25,13 @@ function parseRule(rule: string): { cadence: 'weekly' | 'biweekly'; dow: number;
 }
 
 function nextOccurrenceDate(now: Date, dow: number, cadence: 'weekly' | 'biweekly'): string {
-  // Find the next date >= today where date.getDay() === dow.
-  const d = new Date(now)
-  d.setHours(0, 0, 0, 0)
-  const daysAhead = (dow - d.getDay() + 7) % 7
-  d.setDate(d.getDate() + (daysAhead === 0 ? 7 : daysAhead)) // always in the future
+  // Find the next Sydney calendar date with this weekday. Date-only UTC
+  // arithmetic keeps the result stable regardless of the cron host timezone.
+  const today = calendarDateInTimeZone(now, 'Australia/Sydney')
+    || now.toISOString().slice(0, 10)
+  const todayDow = calendarDayOfWeek(today) ?? 0
+  const daysAhead = (dow - todayDow + 7) % 7
+  const target = addCalendarDays(today, daysAhead === 0 ? 7 : daysAhead) || today
   if (cadence === 'biweekly') {
     // Bias to a fortnight — for v1 this is a best-effort "next available slot"
     // rather than strict every-other-week alignment. Good enough for MVP.
@@ -36,7 +39,7 @@ function nextOccurrenceDate(now: Date, dow: number, cadence: 'weekly' | 'biweekl
     // every-other-week cadence once the cron has run twice in a row on a
     // week with no hang.
   }
-  return d.toISOString().split('T')[0]
+  return target
 }
 
 export async function GET(req: Request) {

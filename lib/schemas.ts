@@ -9,9 +9,17 @@ const ShortText = (max: number) =>
   z.string().trim().min(1, 'Required').max(max, `Too long (max ${max})`)
 const OptionalShortText = (max: number) =>
   z.string().trim().max(max).optional().or(z.literal(''))
-const HangId = z.string().min(4).max(32)
 const ParticipantId = z.string().min(4).max(64)
-const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date')
+const DateStr = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date')
+  .refine(value => {
+    const [year, month, day] = value.split('-').map(Number)
+    const date = new Date(Date.UTC(year, month - 1, day))
+    return date.getUTCFullYear() === year
+      && date.getUTCMonth() === month - 1
+      && date.getUTCDate() === day
+  }, 'Invalid date')
 const Hour = z.number().int().min(0).max(23)
 
 // Location: allow plain text OR http/https URLs — reject javascript:/data:/etc.
