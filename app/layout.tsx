@@ -1,14 +1,13 @@
-// Root layout — sets fonts (self-hosted via next/font), metadata, and global shell.
+// Root layout sets fonts, metadata, and the global Hangs shell.
 import type { Metadata, Viewport } from 'next'
-import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
+import { JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
+import Link from 'next/link'
 import Script from 'next/script'
 import './globals.css'
 import { ToastHost } from '@/components/Toast'
 import { ConfirmHost } from '@/components/ui/ConfirmModal'
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-body' })
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', weight: ['400', '500'] })
-// Plus Jakarta Sans is self-hosted at build time — no runtime Google request.
 const display = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-display', weight: ['500', '600', '700', '800'] })
 
 export const viewport: Viewport = {
@@ -20,10 +19,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: 'hangs — plan your next hangout',
+    default: 'hangs · plan your next hangout',
     template: '%s · hangs',
   },
-  description: 'Find when everyone is free, vote on what to do, get a plan. One link, 60 seconds.',
+  description: 'Find the time, pick the thing, and get an honest headcount. One link, no signup.',
   applicationName: 'hangs',
   icons: {
     icon: [
@@ -31,15 +30,15 @@ export const metadata: Metadata = {
     ],
   },
   openGraph: {
-    title: 'hangs — plan your next hangout',
-    description: 'One link. Everyone fills in when they\'re free. You get a plan.',
+    title: 'hangs · plan your next hangout',
+    description: 'Find the time, pick the thing, and get an honest headcount. No signup.',
     type: 'website',
     siteName: 'hangs',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'hangs — plan your next hangout',
-    description: 'One link. Everyone fills in when they\'re free. You get a plan.',
+    title: 'hangs · plan your next hangout',
+    description: 'Find the time, pick the thing, and get an honest headcount. No signup.',
   },
   appleWebApp: {
     capable: true,
@@ -55,31 +54,21 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <head />
-      <body className={`${inter.variable} ${mono.variable} ${display.variable} antialiased`}
-        style={{ background: 'var(--bg)', color: 'var(--text-primary)', fontFamily: 'var(--font-body), Inter, sans-serif' }}>
-        <header style={{
-          padding: '16px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          <a href="/" style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '22px',
-            fontWeight: 800,
-            color: 'var(--text-primary)',
-            textDecoration: 'none',
-            letterSpacing: '-0.03em',
-          }}>
+      <body className={`${mono.variable} ${display.variable} antialiased`}>
+        <header className="site-header">
+          <Link href="/" className="site-brand" aria-label="Hangs home">
+            <span className="site-brand-mark" aria-hidden="true"><i /><i /><i /></span>
             hangs
-          </a>
+          </Link>
+          <nav className="site-nav" aria-label="Main navigation">
+            <Link href="/login">Log in</Link>
+          </nav>
         </header>
-        <main style={{ minHeight: '100vh' }}>{children}</main>
+        <main className="site-main">{children}</main>
         <ToastHost />
         <ConfirmHost />
-        {/* Google Identity Services — loaded once, used by GoogleCalendarSync. */}
-        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
+        {/* Google Identity Services loads lazily for GoogleCalendarSync. */}
+        <Script src="https://accounts.google.com/gsi/client" strategy="lazyOnload" />
       </body>
     </html>
   )

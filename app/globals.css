@@ -7,19 +7,19 @@
   /* Background */
   --bg: #FAF8F3;
   --surface: #FFFFFF;
-  --surface-dim: #F2EFE8;
-  --surface-hover: #EDEAE3;
+  --surface-dim: #F0ECE3;
+  --surface-hover: #E9E3D8;
 
   /* Text */
-  --text: #1A1A1A;
-  --text-primary: #1A1A1A;        /* alias → --text */
-  --text-secondary: #6B6B6B;
-  --text-muted: #767676;          /* darkened from #A3A3A3 — passes WCAG AA at 9-12px */
+  --text: #1B1A17;
+  --text-primary: #1B1A17;
+  --text-secondary: #625F58;
+  --text-muted: #747068;
 
-  /* Accent — ONE yellow, used sparingly. Reserve for the single next action. */
-  --accent: #F5C842;
-  --accent-hover: #E5B832;
-  --accent-text: #1A1A1A;
+  /* One yellow accent, reserved for the single next action. */
+  --accent: #F4C94A;
+  --accent-hover: #E9BB32;
+  --accent-text: #1B1A17;
 
   /* Availability states */
   --free: #34C26A;
@@ -38,11 +38,11 @@
   --celebrate: #FF6B2B;
 
   /* Borders */
-  --border: #E8E3D9;
-  --border-light: #F0EDE6;
+  --border: #DED7CA;
+  --border-light: #EAE5DB;
 
-  /* Typography — --font-display injected by next/font at runtime */
-  --font-body: 'Inter', sans-serif;
+  /* Plus Jakarta carries both display and body; mono is reserved for metadata. */
+  --font-body: 'Plus Jakarta Sans', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
   /* Radii */
@@ -51,25 +51,92 @@
   --radius: 12px;                 /* canonical mid-size; alias for --radius-md */
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-xl: 24px;
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
-  --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-sm: 0 1px 2px rgba(65, 52, 29, 0.05);
+  --shadow-md: 0 6px 20px rgba(65, 52, 29, 0.08);
+  --shadow-lg: 0 18px 48px rgba(65, 52, 29, 0.12);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
   -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-body), sans-serif;
 }
+
+button,
+input,
+textarea,
+select { font: inherit; }
+
+img { display: block; max-width: 100%; }
+
+.site-header {
+  width: min(100% - 2.5rem, 1380px);
+  min-height: 70px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.site-brand {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 1.22rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  text-decoration: none;
+}
+
+.site-brand-mark {
+  height: 17px;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.site-brand-mark i {
+  display: block;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: rotate(10deg);
+}
+
+.site-brand-mark i:nth-child(1) { height: 9px; }
+.site-brand-mark i:nth-child(2) { height: 17px; }
+.site-brand-mark i:nth-child(3) { height: 12px; }
+
+.site-nav { display: flex; align-items: center; gap: 1.5rem; }
+.site-nav a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.site-nav a:hover { color: var(--text); }
+.site-main { min-height: calc(100dvh - 70px); }
 
 /* ── BUTTONS ── */
 .btn-primary {
@@ -85,11 +152,14 @@ body {
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition-property: transform, background-color, box-shadow, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
   width: 100%;
+  text-decoration: none;
 }
 .btn-primary:hover { background: var(--accent-hover); box-shadow: var(--shadow-md); }
-.btn-primary:active { transform: scale(0.98); }
+.btn-primary:active { transform: scale(0.96); }
 .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
 .btn-secondary {
@@ -105,14 +175,16 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition-property: transform, background-color, border-color;
+  transition-duration: 180ms;
 }
 .btn-secondary:hover { background: var(--surface-dim); }
+.btn-secondary:active { transform: scale(0.96); }
 
 /* ── REDUCED MOTION ── */
 /* Users who enabled "reduce motion" in their OS settings get near-instant
    transitions instead of slides/fades/skeleton shimmers. Accessibility
-   baseline — framer-motion also auto-honours this at the component level. */
+   baseline; framer-motion also auto-honours this at the component level. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -176,7 +248,8 @@ a:focus-visible,
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition-property: transform, background-color, border-color, color;
+  transition-duration: 160ms;
   user-select: none;
 }
 .chip:hover { background: var(--surface-hover); }
@@ -218,14 +291,15 @@ a:focus-visible,
 }
 .progress-dot-active { background: var(--accent); transform: scaleX(1.1); }
 
-/* ── AVAILABILITY GRID ── */
+/* AVAILABILITY GRID */
 .grid-cell {
   width: 48px;
   height: 40px;
   border-radius: 8px;
   border: 1px solid var(--border-light);
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition-property: transform, background-color, border-color;
+  transition-duration: 100ms;
   position: relative;
   padding: 0;
   display: inline-flex;
@@ -236,12 +310,12 @@ a:focus-visible,
   font-weight: 700;
   line-height: 1;
 }
-.grid-cell:active { transform: scale(0.92); }
+.grid-cell:active { transform: scale(0.96); }
 .grid-cell-free { background: var(--free); border-color: var(--free); }
 .grid-cell-maybe { background: var(--maybe); border-color: var(--maybe); }
 .grid-cell-busy { background: var(--surface-dim); }
 /* Colorblind-safe glyphs. High-opacity so ✓/~/✗ read as real non-colour
-   signals at small sizes — not just a subtle tint overlay. */
+   signals at small sizes, not just a subtle tint overlay. */
 .grid-cell-free::after  { content: '✓'; color: rgba(255,255,255,0.90); }
 .grid-cell-maybe::after { content: '~'; color: rgba(26,26,26,0.90); }
 .grid-cell-busy::after  { content: ''; }
@@ -267,7 +341,8 @@ a:focus-visible,
   background: var(--surface);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition-property: transform, background-color, border-color, color;
+  transition-duration: 160ms;
 }
 .vote-keen { border-color: var(--free); background: var(--free-light); color: #1a7a3a; }
 .vote-meh { border-color: var(--maybe); background: var(--maybe-light); color: #8a6d10; }
@@ -334,7 +409,7 @@ a:focus-visible,
 }
 
 /* ── STICKY BAR ── */
-/* Solid fill — no glassmorphism (brief explicitly bans backdrop-blur). */
+/* Solid fill with no backdrop blur. */
 .sticky-bar {
   position: fixed;
   bottom: 0;
@@ -366,6 +441,8 @@ a:focus-visible,
 
 /* ── MOBILE RESPONSIVE ── */
 @media (max-width: 480px) {
+  .site-header { width: calc(100% - 2rem); min-height: 62px; }
+  .site-main { min-height: calc(100dvh - 62px); }
   .section-title {
     font-size: 22px;
   }
@@ -441,7 +518,7 @@ a:focus-visible,
   }
 }
 
-/* Grid scroll hint — fade on right edge */
+/* Grid scroll hint fades the right edge. */
 .grid-scroll-container {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -476,7 +553,7 @@ a:focus-visible,
 
 /* ── COMMITMENT PILL (big, weighty) ──
    The three-tier commit is the product's moat. Make it feel like a real
-   decision — tap target well above 44px, scale-down on press, bold ring
+   decision; tap target well above 44px, scale-down on press, bold ring
    on the selected state so the chosen answer feels locked in. */
 .commit-pill {
   display: flex;
@@ -505,4 +582,3 @@ a:focus-visible,
     min-height: 68px;
   }
 }
-
