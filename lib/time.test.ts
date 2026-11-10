@@ -1,34 +1,12 @@
 // Regression coverage for timezone-safe calendar-date helpers.
 import { describe, expect, it } from 'vitest'
-import { addCalendarDays, calendarDateInTimeZone, calendarDayOfWeek, differenceInCalendarDays, expandDateRange, formatCalendarDateTime, formatDeadline, isDateBeforeLocalToday, isDateBeforeTodayInTimeZone, zonedCalendarDateTimeToUtc } from './time'
-
-describe('expandDateRange', () => {
-  it('keeps an inclusive date range on the selected calendar days', () => {
-    expect(expandDateRange('2026-08-28', '2026-08-30')).toEqual([
-      '2026-08-28',
-      '2026-08-29',
-      '2026-08-30',
-    ])
-  })
-
-  it('caps long ranges at 31 days', () => {
-    const dates = expandDateRange('2026-01-01', '2026-12-31')
-    expect(dates).toHaveLength(31)
-    expect(dates.at(-1)).toBe('2026-01-31')
-  })
-
-  it('rejects invalid or reversed ranges', () => {
-    expect(expandDateRange('2026-02-31', '2026-03-02')).toEqual([])
-    expect(expandDateRange('2026-08-30', '2026-08-28')).toEqual([])
-    expect(expandDateRange('not-a-date', '2026-08-28')).toEqual([])
-  })
-})
+import { addCalendarDays, calendarDateInTimeZone, calendarDayOfWeek, zonedDateTimeToUtc } from './time'
 
 describe('calendar-date arithmetic', () => {
-  it('adds and compares dates without DST or host-timezone shifts', () => {
+  it('adds dates without DST or host-timezone shifts', () => {
     expect(addCalendarDays('2026-10-03', 1)).toBe('2026-10-04')
     expect(addCalendarDays('2026-12-31', 1)).toBe('2027-01-01')
-    expect(differenceInCalendarDays('2026-08-28', '2026-08-30')).toBe(2)
+    expect(addCalendarDays('2026-02-30', 1)).toBeNull()
     expect(calendarDayOfWeek('2026-08-28')).toBe(5)
   })
 
@@ -38,50 +16,29 @@ describe('calendar-date arithmetic', () => {
   })
 })
 
-describe('isDateBeforeLocalToday', () => {
-  const localNoon = new Date(2026, 7, 28, 12)
-
-  it('only marks calendar days before the viewer\'s local day as past', () => {
-    expect(isDateBeforeLocalToday('2026-08-27', localNoon)).toBe(true)
-    expect(isDateBeforeLocalToday('2026-08-28', localNoon)).toBe(false)
-    expect(isDateBeforeLocalToday('2026-08-29', localNoon)).toBe(false)
+describe('zonedDateTimeToUtc', () => {
+  it('converts Sydney wall-clock time with minutes to UTC (AEDT, +11)', () => {
+    expect(zonedDateTimeToUtc('2026-11-21', '13:30', 'Australia/Sydney')?.toISOString()).toBe('2026-11-21T02:30:00.000Z')
   })
-})
 
-describe('isDateBeforeTodayInTimeZone', () => {
-  it('uses the event timezone rather than the viewer timezone', () => {
-    const instant = new Date('2026-08-29T15:00:00.000Z')
-    expect(isDateBeforeTodayInTimeZone('2026-08-29', 'Australia/Sydney', instant)).toBe(true)
-    expect(isDateBeforeTodayInTimeZone('2026-08-29', 'America/New_York', instant)).toBe(false)
+  it('handles AEST (+10) in winter', () => {
+    expect(zonedDateTimeToUtc('2026-07-04', '09:05', 'Australia/Sydney')?.toISOString()).toBe('2026-07-03T23:05:00.000Z')
   })
-})
 
-describe('formatCalendarDateTime', () => {
-  it('formats the locked calendar date and handles midnight', () => {
-    expect(formatCalendarDateTime('2026-08-29', 17)).toBe('Sat 29 Aug, 5pm')
-    expect(formatCalendarDateTime('2026-08-29', 0)).toBe('Sat 29 Aug, 12am')
+  it('handles the day DST starts in Sydney', () => {
+    // 4 Oct 2026: clocks jump 02:00 -> 03:00; 13:00 is AEDT.
+    expect(zonedDateTimeToUtc('2026-10-04', '13:00', 'Australia/Sydney')?.toISOString()).toBe('2026-10-04T02:00:00.000Z')
   })
-})
 
-describe('zonedCalendarDateTimeToUtc', () => {
-  it('converts Sydney wall time independently of the server timezone', () => {
-    expect(zonedCalendarDateTimeToUtc('2026-08-29', 0, 'Australia/Sydney')?.toISOString())
-      .toBe('2026-08-28T14:00:00.000Z')
-    expect(zonedCalendarDateTimeToUtc('2026-01-15', 12, 'Australia/Sydney')?.toISOString())
-      .toBe('2026-01-15T01:00:00.000Z')
+  it('works for UTC and other zones', () => {
+    expect(zonedDateTimeToUtc('2026-11-21', '18:45', 'UTC')?.toISOString()).toBe('2026-11-21T18:45:00.000Z')
+    expect(zonedDateTimeToUtc('2026-11-21', '18:00', 'America/New_York')?.toISOString()).toBe('2026-11-21T23:00:00.000Z')
   })
-})
 
-describe('formatDeadline', () => {
-  it('uses the Sydney end of day instead of the viewer timezone', () => {
-    const beforeSydneyMidnight = new Date('2026-08-28T13:30:00.000Z')
-    const afterSydneyMidnight = new Date('2026-08-28T14:00:01.000Z')
-
-    expect(formatDeadline('2026-08-28', beforeSydneyMidnight)?.text).toBe('closes in 30m')
-    expect(formatDeadline('2026-08-28', afterSydneyMidnight)).toEqual({
-      text: 'responses closed',
-      urgent: false,
-      closed: true,
-    })
+  it('rejects bad input', () => {
+    expect(zonedDateTimeToUtc('2026-02-30', '10:00', 'UTC')).toBeNull()
+    expect(zonedDateTimeToUtc('2026-11-21', '24:00', 'UTC')).toBeNull()
+    expect(zonedDateTimeToUtc('2026-11-21', '9:00', 'UTC')).toBeNull()
+    expect(zonedDateTimeToUtc('2026-11-21', '09:00', 'Not/AZone')).toBeNull()
   })
 })

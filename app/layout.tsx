@@ -1,76 +1,41 @@
-// Root layout sets fonts, metadata, and the global Hangs shell.
+// Root layout: fonts (Jakarta / Inter / JetBrains Mono), global tokens, site metadata, the hash-secret capture and the toast provider.
 import type { Metadata, Viewport } from 'next'
-import { JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
-import Link from 'next/link'
-import Script from 'next/script'
+import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
+import type { ReactNode } from 'react'
+import { ToastProvider } from '@/components/ui/Toast'
+import { BRAND } from '@/lib/brand'
+import { HASH_CAPTURE_SCRIPT } from '@/lib/hash-capture'
+import { siteUrl } from '@/lib/site'
 import './globals.css'
-import { ToastHost } from '@/components/Toast'
-import { ConfirmHost } from '@/components/ui/ConfirmModal'
 
-const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', weight: ['400', '500'] })
-const display = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-display', weight: ['500', '600', '700', '800'] })
+const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], weight: ['600', '700', '800'], variable: '--font-jakarta', display: 'swap' })
+const inter = Inter({ subsets: ['latin'], weight: ['400', '600'], variable: '--font-inter', display: 'swap' })
+const jbmono = JetBrains_Mono({ subsets: ['latin'], weight: ['500'], variable: '--font-jbmono', display: 'swap' })
+
+// metadataBase is the configured site URL; only when none is set (local runs) does it follow the request's host.
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    metadataBase: new URL(await siteUrl()),
+    title: { default: "Hangs: find the day everyone's free", template: '%s · Hangs' },
+    description: "Pick some days, send one link, see who's free. No sign-up, works on any phone.",
+    openGraph: { type: 'website', images: [{ url: '/api/og', width: 1200, height: 630, alt: 'Hangs' }] },
+    twitter: { card: 'summary_large_image', images: ['/api/og'] },
+  }
+}
 
 export const viewport: Viewport = {
+  themeColor: BRAND.bg,
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: '#FAF8F3',
 }
 
-export const metadata: Metadata = {
-  title: {
-    default: 'hangs · plan your next hangout',
-    template: '%s · hangs',
-  },
-  description: 'Find the time, pick the thing, and get an honest headcount. One link, no signup.',
-  applicationName: 'hangs',
-  icons: {
-    icon: [
-      { url: '/favicon.svg', type: 'image/svg+xml' },
-    ],
-  },
-  openGraph: {
-    title: 'hangs · plan your next hangout',
-    description: 'Find the time, pick the thing, and get an honest headcount. No signup.',
-    type: 'website',
-    siteName: 'hangs',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'hangs · plan your next hangout',
-    description: 'Find the time, pick the thing, and get an honest headcount. No signup.',
-  },
-  appleWebApp: {
-    capable: true,
-    title: 'hangs',
-    statusBarStyle: 'default',
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
-}
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${mono.variable} ${display.variable} antialiased`}>
-        <header className="site-header">
-          <Link href="/" className="site-brand" aria-label="Hangs home">
-            <span className="site-brand-mark" aria-hidden="true"><i /><i /><i /></span>
-            hangs
-          </Link>
-          <nav className="site-nav" aria-label="Main navigation">
-            <Link href="/create" className="site-nav-primary">Plan a hang</Link>
-            <Link href="/crews">Crews</Link>
-            <Link href="/login">Log in</Link>
-          </nav>
-        </header>
-        <main className="site-main">{children}</main>
-        <ToastHost />
-        <ConfirmHost />
-        {/* Google Identity Services loads lazily for GoogleCalendarSync. */}
-        <Script src="https://accounts.google.com/gsi/client" strategy="lazyOnload" />
+    <html lang="en-AU" className={`${jakarta.variable} ${inter.variable} ${jbmono.variable}`}>
+      <body className="bg-bg font-sans text-ink antialiased">
+        <script dangerouslySetInnerHTML={{ __html: HASH_CAPTURE_SCRIPT }} />
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   )

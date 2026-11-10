@@ -1,54 +1,50 @@
-// Editorial privacy policy for Hangs, including the Google Calendar data boundary.
+// Privacy page: a short, honest list of what Hangs stores, who can see it, where it lives and how long it is kept.
+import type { Metadata } from 'next'
+import Link from 'next/link'
+import { Wordmark } from '@/components/ui/Wordmark'
 
-import styles from '@/app/product.module.css'
-
-export const metadata = {
-  title: 'Privacy — hangs',
-  description: 'What hangs stores, what it doesn\'t, and how Google Calendar sync works.',
+export const metadata: Metadata = {
+  title: 'Privacy',
+  description: 'What Hangs stores, and what it does not.',
 }
+
+const POINTS = [
+  "Hangs stores what you type: the hang's title, note, the days, names, answers, and the time and place once it's locked in.",
+  "Anyone with a hang's link can see all of it: the title, note, place, everyone's names and answers. Only share it with people you'd tell.",
+  "The link preview image and the calendar file show the title, the day and the place to anyone who has the link.",
+  'Hang pages are hidden from search engines and not listed anywhere. The link is the only way in, and it is not passed on to sites you open from a hang.',
+  'No accounts, no ads, no analytics and no cookies.',
+  'Your device keeps a private key so you can edit your answers. We only store a scrambled (hashed) version of it.',
+  'Your browser also remembers your name, the hangs you have opened and answers not yet saved, on that device only.',
+  'To stop abuse we count requests per connection. We store a scrambled code made from your IP address with a secret key that changes every day, never the address itself, and delete it after about an hour (the next time anyone saves something).',
+  'Hangs runs on Vercel and its data is stored with Turso, both in Tokyo, Japan. They keep their own short-lived request logs, which include IP addresses.',
+  "Hangs are kept until they're deleted; nothing removes them automatically yet. The organiser can remove anyone's answers, so ask them if you want yours gone.",
+]
 
 export default function PrivacyPage() {
   return (
-    <article className={styles.page}>
-      <header className={styles.policyHeader}>
-        <span className={styles.eyebrow}>The short version, in full</span>
-        <h1 className={styles.titleLarge}>Privacy</h1>
-        <p className={styles.lede}>hangs is a side project. This page is short on purpose.</p>
+    <div className="mx-auto flex min-h-dvh w-full max-w-(--col-max) flex-col px-(--gutter)">
+      <header className="flex h-14 items-center">
+        <Wordmark />
       </header>
-
-      <PolicySection title="What hangs stores">
-        <ul>
-          <li>The hang name, dates, activities, location, and bring list you enter when you create a hang.</li>
-          <li>Your first name (or whatever you type) when you respond to a hang.</li>
-          <li>Your availability grid and your votes, tied to an anonymous participant ID.</li>
-          <li>A signed JWT in your browser so your responses can&apos;t be edited by someone else.</li>
-          <li>Photos you upload to a hang recap (EXIF metadata is stripped before upload).</li>
+      <main className="flex-1 pt-8 pb-16">
+        <h1 className="font-display text-3xl leading-display font-extrabold tracking-display text-ink">Privacy</h1>
+        <p className="mt-3 text-base text-ink-2">The short version, in plain words.</p>
+        <ul className="mt-8 flex flex-col border-t border-line">
+          {POINTS.map(p => (
+            <li key={p} className="flex gap-3 border-b border-line py-4 text-base text-ink">
+              <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-ink" />
+              <span>{p}</span>
+            </li>
+          ))}
         </ul>
-      </PolicySection>
-      <PolicySection title="What hangs doesn&apos;t store">
-        <ul>
-          <li>Your email address or phone number — there&apos;s no signup.</li>
-          <li>Your precise location. The optional &quot;location&quot; field on a hang is just text.</li>
-          <li>Any tracking cookies or third-party analytics.</li>
-          <li>Any of your Google Calendar event details (see below).</li>
-        </ul>
-      </PolicySection>
-      <PolicySection title="Google Calendar sync">
-        <p>If you use the optional &quot;Sync Google Calendar&quot; button on the availability step, hangs asks Google for the <code>calendar.freebusy</code> scope only — the narrowest Calendar scope Google offers. This returns just the start and end times of events you&apos;re busy for. It never returns titles, locations, attendees, or any other event detail.</p>
-        <p>The access token Google issues lives in your browser for a few minutes and is used exactly once to call Google&apos;s <code>freebusy.query</code> API directly from your browser. The token is never sent to the hangs backend, never saved to cookies or localStorage, and expires automatically. hangs never stores any information about your calendar — only the &quot;busy/free&quot; cells you see painted on the grid after the sync, which are treated the same as if you&apos;d painted them yourself.</p>
-      </PolicySection>
-      <PolicySection title="Deletion">
-        <p>Any hang creator can delete their hang from the results page, which cascades and deletes every participant&apos;s availability, votes, and comments for that hang.</p>
-        <p>Any participant can remove themselves from a hang via the &quot;Remove me from this hang&quot; button. Their availability, votes, and comments are deleted immediately.</p>
-      </PolicySection>
-      <PolicySection title="Contact">
-        <p>Built by Ethan Wu. Questions? Email <a href="mailto:ethanswu@gmail.com">ethanswu@gmail.com</a>.</p>
-      </PolicySection>
-      <p className={styles.meta} style={{ marginTop: '2rem' }}>LAST UPDATED 2026-04-16</p>
-    </article>
+        <Link
+          href="/"
+          className="mt-8 inline-flex min-h-11 items-center rounded-md font-semibold text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+        >
+          Back to Hangs
+        </Link>
+      </main>
+    </div>
   )
-}
-
-function PolicySection({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className={styles.policyGrid}><h2>{title}</h2><div className={styles.policyBody}>{children}</div></section>
 }

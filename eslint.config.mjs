@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated, gitignored output (throwaway QA scripts, browser automation, local exports).
+    ".qa/**",
+    ".playwright-cli/**",
+    "output/**",
+    "coverage/**",
+    ".vercel/**",
   ]),
 ]);
 
