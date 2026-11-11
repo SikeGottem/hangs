@@ -7,7 +7,7 @@ import { Avatar, Button, IconButton, useToast } from '@/components/ui'
 import { removePerson } from '@/lib/client'
 import { plural } from '@/lib/format'
 import { LOCAL_PERSON_ID } from '@/lib/state'
-import type { OrganiserBaseProps } from './LockCta'
+import type { OrganiserBaseProps } from './hooks'
 
 export function ResponsesManager({ state, onState }: OrganiserBaseProps) {
   const { toast } = useToast()
@@ -58,7 +58,7 @@ export function ResponsesManager({ state, onState }: OrganiserBaseProps) {
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-md font-semibold text-ink">{p.name}</span>
                 <span className="mono-label tabular text-ink-3">
-                  {p.answeredCount === 0 ? 'NO ANSWERS' : `${p.answeredCount} ${plural(p.answeredCount, 'ANSWER', 'ANSWERS')}`}
+                  {p.answeredCount === 0 ? 'No answers' : `${p.answeredCount} ${plural(p.answeredCount, 'answer', 'answers')}`}
                 </span>
               </span>
               {!asking && (

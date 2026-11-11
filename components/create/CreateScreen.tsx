@@ -1,19 +1,18 @@
 // The home page create form: title, note, candidate days (calendar + presets), answer mode, organiser name, submit.
 'use client'
 
-import { ArrowRight, CircleAlert, Clock, Sun } from 'lucide-react'
+import { CircleAlert } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import {
-  Button, CalendarPicker, Card, Field, MonoLabel, prefersReducedMotion, Segmented, Skeleton, StickyBar, TextInput, useMounted, useToast, Wordmark,
-} from '@/components/ui'
+import { CalendarPicker, cx, prefersReducedMotion, useMounted, useToast, Wordmark } from '@/components/ui'
+import { Poster, PosterButton, PosterLink } from '@/components/event/Poster'
 import { createEvent, getRememberedName } from '@/lib/client'
-import { isValidTimeZone, todayIn } from '@/lib/dates'
-import { formatDate, plural } from '@/lib/format'
+import { isValidTimeZone, nextWeekends, todayIn } from '@/lib/dates'
+import { plural } from '@/lib/format'
+import { COBALT } from '@/lib/poster'
 import type { EventMode } from '@/lib/types'
-import { DatePresets } from './DatePresets'
 import { RecentHangs } from './RecentHangs'
 
 type FieldKey = 'title' | 'dates' | 'name'
@@ -22,11 +21,6 @@ const MAX_DAYS = 62
 const MAX_PART_DAYS = 20
 const FALLBACK_TZ = 'Australia/Sydney'
 const HAS_LETTER = /[\p{L}\p{N}]/u
-const HELP: Record<FieldKey, string> = { title: 'Add a title', dates: 'Pick at least one day', name: 'Add your name' }
-const MODE_OPTIONS: { value: EventMode; label: string; icon: typeof Sun }[] = [
-  { value: 'days', label: 'Whole days', icon: Sun },
-  { value: 'parts', label: 'Parts of the day', icon: Clock },
-]
 
 function deviceTimeZone(): string {
   try {
@@ -83,7 +77,6 @@ export function CreateScreen() {
   const titleOk = title.trim().length > 0
   const nameOk = HAS_LETTER.test(name)
   const missing: FieldKey | null = !titleOk ? 'title' : n === 0 ? 'dates' : !nameOk ? 'name' : null
-  const complete = missing === null
 
   const showError = (k: FieldKey) =>
     revealed.has(k) && (k === 'title' ? !titleOk : k === 'dates' ? n === 0 : !nameOk)
@@ -151,200 +144,118 @@ export function CreateScreen() {
     setSubmitting(false)
   }
 
-  const counter = n === 0
-    ? 'No days yet'
-    : mode === 'parts'
-      ? `${n} ${plural(n, 'day', 'days')} × 3 = ${n * 3} options`
-      : `${n} ${plural(n, 'day', 'days')}`
+  const counter = `${n} ${plural(n, 'day', 'days')}`
 
-  const range = n === 0 || !today
-    ? null
-    : n === 1
-      ? formatDate(liveDates[0], { today })
-      : `${formatDate(liveDates[0], { today })} – ${formatDate(liveDates[n - 1], { today })}`
+  const weekends = today ? nextWeekends(today, 3) : []
+  const inputLine = 'w-full bg-transparent outline-none placeholder:text-current placeholder:opacity-70 focus-visible:outline-none'
 
   return (
-    <div className="mx-auto w-full max-w-(--col-max) px-(--gutter) min-[960px]:max-w-260">
-      <header className="flex h-14 items-center">
+    <Poster colour={COBALT} accent>
+      <header className="flex items-center justify-between">
         <Wordmark />
+        <p className="text-md font-medium">No sign-up</p>
       </header>
+      <h1 className="sr-only">Find the day everyone&rsquo;s free</h1>
 
-      <main>
-        <form
-          noValidate
-          aria-label="Make a plan"
-          onSubmit={submit}
-          className="flex flex-col gap-6 pt-3 min-[960px]:grid min-[960px]:grid-cols-[minmax(0,1fr)_var(--create-side)] min-[960px]:items-start min-[960px]:gap-x-(--create-gap) min-[960px]:gap-y-8 min-[960px]:pt-12"
-        >
-          {/* Intro + title + note */}
-          <div className="flex flex-col gap-6 min-[960px]:col-start-1 min-[960px]:row-start-1">
-            <div className="flex flex-col gap-3">
-              <MonoLabel as="p" tone="ink-3">Find the day · No sign-up</MonoLabel>
-              <h1 className="font-display text-display leading-display font-extrabold tracking-display text-balance text-ink min-[960px]:text-4xl">
-                Find the day everyone&rsquo;s free.
-              </h1>
-              <p className="max-w-[34ch] text-base text-ink-2">
-                Pick some days, send one link, see who&rsquo;s free. Works on any phone.
-              </p>
-            </div>
+      <form noValidate aria-label="Make a plan" onSubmit={submit} className="mt-3 flex flex-1 flex-col lg:mt-8 lg:grid lg:grid-cols-2 lg:grid-rows-[auto_1fr] lg:gap-x-16">
+        <div className="flex flex-col lg:col-start-1 lg:row-start-1">
+          <label htmlFor="create-title" className="text-lg font-medium">What&apos;s the plan?</label>
+          <input
+            ref={titleRef}
+            id="create-title"
+            name="title"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            onKeyDown={e => onEnter(e, () => noteRef.current?.focus())}
+            placeholder="Picnic at mine"
+            maxLength={60}
+            autoComplete="off"
+            autoCapitalize="sentences"
+            enterKeyHint="next"
+            aria-invalid={titleError ? true : undefined}
+            aria-describedby={titleError ? 'title-error' : undefined}
+            className={cx(inputLine, 'h-14 text-title font-extrabold tracking-poster')}
+          />
+          {titleError && <FormError id="title-error">{titleError}</FormError>}
 
-            <Field label="What's the plan?" htmlFor="create-title" error={titleError}>
-              <TextInput
-                ref={titleRef}
-                id="create-title"
-                name="title"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                onKeyDown={e => onEnter(e, () => noteRef.current?.focus())}
-                placeholder="Picnic at mine"
-                maxLength={60}
-                counter={{ max: 60 }}
-                autoComplete="off"
-                autoCapitalize="sentences"
-                enterKeyHint="next"
-              />
-            </Field>
+          <label className="flex min-h-11 items-center gap-3 border-b-2 border-current">
+            <span className="sr-only">Where, or a note (optional)</span>
+            <input
+              ref={noteRef}
+              id="create-note"
+              name="note"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              onKeyDown={e => onEnter(e, () => noteRef.current?.blur())}
+              placeholder="Where, or a note (optional)"
+              maxLength={140}
+              autoComplete="off"
+              autoCapitalize="sentences"
+              enterKeyHint="done"
+              className={cx(inputLine, 'text-lg font-medium')}
+            />
+          </label>
+        </div>
 
-            <Field label="Where, or a note" htmlFor="create-note" optional>
-              <TextInput
-                ref={noteRef}
-                id="create-note"
-                name="note"
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                onKeyDown={e => onEnter(e, () => noteRef.current?.blur())}
-                placeholder="My place, bring a rug"
-                maxLength={140}
-                counter={{ max: 140 }}
-                autoComplete="off"
-                autoCapitalize="sentences"
-                enterKeyHint="done"
-              />
-            </Field>
+        <section ref={daysRef} tabIndex={-1} aria-labelledby="days-label" aria-describedby={datesError ? 'days-error' : undefined} className="mt-3 flex scroll-mt-6 flex-col rounded-lg outline-none lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mt-0">
+          <h2 id="days-label" className="sr-only">Which days could work?</h2>
+          {today ? (
+            <CalendarPicker value={liveDates} onChange={setDates} today={today} maxSelected={maxSelected} onLimit={onLimit} labelledBy="days-label" viewDate={viewDate} />
+          ) : (
+            <div aria-hidden className="h-92" />
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-x-4">
+            <PosterLink onClick={() => onPresetChange([...new Set([...liveDates, ...weekends])].sort().slice(0, maxSelected))}>Next 3 weekends</PosterLink>
+            <span aria-live="polite" className="text-lg font-extrabold tabular">{counter}</span>
           </div>
-
-          {/* Calendar card */}
-          <Card
-            className="min-[960px]:sticky min-[960px]:top-6 min-[960px]:col-start-2 min-[960px]:row-span-3 min-[960px]:row-start-1"
-          >
-            <section
-              ref={daysRef}
-              tabIndex={-1}
-              aria-labelledby="days-label"
-              aria-describedby={datesError ? 'days-error' : undefined}
-              className="flex scroll-mt-6 flex-col gap-3 rounded-lg"
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <MonoLabel as="h2" id="days-label" tone="ink">Pick some days</MonoLabel>
-                <span aria-live="polite" className="mono-label tabular text-ink-2">{counter}</span>
-              </div>
-
-              {today ? (
-                <>
-                  <DatePresets
-                    today={today}
-                    value={liveDates}
-                    onChange={onPresetChange}
-                    maxSelected={maxSelected}
-                    onLimit={onLimit}
-                  />
-                  <CalendarPicker
-                    value={liveDates}
-                    onChange={setDates}
-                    today={today}
-                    maxSelected={maxSelected}
-                    onLimit={onLimit}
-                    labelledBy="days-label"
-                    viewDate={viewDate}
-                  />
-                </>
-              ) : (
-                <div aria-hidden className="flex flex-col gap-3">
-                  <div className="flex gap-2">
-                    <Skeleton className="h-10 w-40" />
-                    <Skeleton className="h-10 w-32" />
-                  </div>
-                  <Skeleton className="h-11 w-44" />
-                  <Skeleton className="aspect-[7/6] w-full" />
-                </div>
-              )}
-
-              {range && <p className="mono-label tabular text-ink-2">{range}</p>}
-              {datesError && (
-                <p id="days-error" role="alert" className="flex items-start gap-1.5 text-sm text-danger">
-                  <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0" />
-                  <span>Pick at least one day. Tap them on the calendar or use a quick pick.</span>
-                </p>
-              )}
-            </section>
-          </Card>
-
-          {/* Mode + name */}
-          <div className="flex flex-col gap-6 min-[960px]:col-start-1 min-[960px]:row-start-2">
-            <div className="flex flex-col gap-1.5">
-              <p id="create-mode-label" className="text-sm font-semibold text-ink">Whole days or parts of the day?</p>
-              <Segmented label="Whole days or parts of the day?" value={mode} onChange={changeMode} options={MODE_OPTIONS} />
-              <p className="text-sm text-ink-3">Parts of the day: friends answer morning, afternoon and evening for each day.</p>
-            </div>
-
-            <Field label="Your name" htmlFor="create-name" error={nameError}>
-              <TextInput
-                ref={nameRef}
-                id="create-name"
-                name="name"
-                value={name}
-                onChange={e => setNameDraft(e.target.value)}
-                placeholder="So friends know who's asking"
-                counter={{ max: 40, chars: true }}
-                autoComplete="given-name"
-                autoCapitalize="words"
-                enterKeyHint="go"
-              />
-            </Field>
+          <div className="flex flex-wrap items-center justify-between gap-x-4">
+            <PosterLink onClick={() => changeMode(mode === 'days' ? 'parts' : 'days')} aria-pressed={mode === 'parts'}>
+              {mode === 'days' ? 'Ask morning, arvo or evening' : 'Just ask whole days'}
+            </PosterLink>
+            {n > 0 && <PosterLink onClick={() => setDates([])}>Clear</PosterLink>}
           </div>
+          {datesError && <FormError id="days-error">Tap at least one day on the calendar.</FormError>}
+        </section>
 
-          {/* Submit: sticky on mobile, a static block at the end of the left column on desktop */}
-          <StickyBar
-            className="-mx-(--gutter) min-[960px]:static min-[960px]:col-start-1 min-[960px]:row-start-3 min-[960px]:mx-0 min-[960px]:bg-transparent min-[960px]:px-0 min-[960px]:shadow-none"
-          >
-            {/* The bar bleeds to the screen edges on mobile; this re-insets its content to the gutter. */}
-            <div className="flex flex-col gap-2 px-[calc(var(--gutter)-0.75rem)] min-[960px]:px-0">
-              {apiError && (
-                <p role="alert" className="flex items-start gap-1.5 text-sm text-danger">
-                  <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0" />
-                  <span>{apiError}</span>
-                </p>
-              )}
-              <p id="create-helper" aria-live="polite" className={complete ? 'sr-only' : 'text-sm text-ink-3'}>
-                {missing ? HELP[missing] : ''}
-              </p>
-              <Button
-                type="submit"
-                size="lg"
-                fullWidth
-                variant={complete ? 'accent' : 'secondary'}
-                iconRight={ArrowRight}
-                loading={submitting}
-                aria-disabled={complete ? undefined : true}
-                aria-describedby={complete ? undefined : 'create-helper'}
-              >
-                {submitting ? 'Making the link…' : 'Make the link'}
-              </Button>
-            </div>
-          </StickyBar>
-        </form>
+        <div className="mt-auto flex flex-col gap-2.5 pt-3 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:self-end">
+          <label className="flex min-h-11 items-center gap-3 border-b-2 border-current">
+            <span className="text-lg font-medium whitespace-nowrap">Your name</span>
+            <input
+              ref={nameRef}
+              id="create-name"
+              name="name"
+              value={name}
+              onChange={e => setNameDraft(e.target.value)}
+              maxLength={40}
+              autoComplete="given-name"
+              autoCapitalize="words"
+              enterKeyHint="go"
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? 'name-error' : undefined}
+              className={cx(inputLine, 'text-right text-h2 font-extrabold')}
+            />
+          </label>
+          {nameError && <FormError id="name-error">{nameError}</FormError>}
+          {apiError && <FormError>{apiError}</FormError>}
+          <PosterButton type="submit" loading={submitting} className="w-full">
+            {submitting ? 'Making the link' : 'Send to the group'}
+          </PosterButton>
+        </div>
+      </form>
 
-        <RecentHangs className="mt-10 min-[960px]:mt-16 min-[960px]:max-w-[calc(100%-var(--create-side)-var(--create-gap))]" />
-      </main>
-
-      <footer className="flex pt-8 pb-10">
-        <Link
-          href="/privacy"
-          className="inline-flex min-h-11 items-center rounded-sm text-sm text-ink-3 underline-offset-4 hover:text-ink hover:underline"
-        >
-          Privacy
-        </Link>
+      <RecentHangs className="mt-8 lg:max-w-[calc(50%-2rem)]" />
+      <footer className="mt-4">
+        <Link href="/privacy" className="inline-flex min-h-11 items-center rounded-sm text-md underline underline-offset-4">Privacy</Link>
       </footer>
-    </div>
+    </Poster>
+  )
+}
+
+function FormError({ id, children }: { id?: string; children: ReactNode }) {
+  return (
+    <p id={id} role="alert" className="mt-1 flex items-start gap-1.5 text-lg leading-snug font-medium">
+      <CircleAlert aria-hidden size={20} className="mt-0.5 shrink-0" />
+      <span>{children}</span>
+    </p>
   )
 }

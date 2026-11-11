@@ -2,11 +2,12 @@
 'use client'
 
 import { Disclosure, MonoLabel, PersonChip, StateIcon } from '@/components/ui'
-import { isViewer, monoAnswerLabel, tallyLine } from '@/lib/people'
+import { ANSWER_LABELS } from '@/lib/format'
+import { isViewer } from '@/lib/people'
 import type { AnswerValue, EventState } from '@/lib/types'
 
 const GROUPS: Array<{ value: AnswerValue; label: string }> = (['free', 'maybe', 'cant'] as const).map(value => ({
-  value, label: monoAnswerLabel(value, 'rsvp'),
+  value, label: ANSWER_LABELS.rsvp[value],
 }))
 
 const ICON_TONE: Record<AnswerValue, string> = { free: 'text-free', maybe: 'text-maybe', cant: 'text-cant' }
@@ -16,8 +17,11 @@ export function Attendance({ state }: { state: EventState }) {
   if (!a) return null
   const byId = new Map(state.people.map(p => [p.id, p]))
   const isYou = (id: string) => isViewer(state, id)
-  const counts = { free: a.free.length, maybe: a.maybe.length, cant: a.cant.length }
-  const summary = tallyLine(counts, 'rsvp')
+  const summary = [
+    a.free.length ? `${a.free.length} going` : '',
+    a.maybe.length ? `${a.maybe.length} maybe` : '',
+    a.cant.length ? `${a.cant.length} out` : '',
+  ].filter(Boolean).join(', ')
 
   const chips = (ids: string[], value?: AnswerValue) => (
     <ul className="flex flex-wrap gap-2">
@@ -36,8 +40,8 @@ export function Attendance({ state }: { state: EventState }) {
   return (
     <section aria-labelledby="attendance-heading" className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h2 id="attendance-heading" className="font-display text-h2 font-bold tracking-display text-ink">Who&apos;s coming</h2>
-        <p className="mono-label tabular text-ink-2">{summary || "NO ONE'S ANSWERED FOR THIS DAY YET"}</p>
+        <h2 id="attendance-heading" className="text-display font-extrabold tracking-display text-ink">Who&apos;s coming</h2>
+        <p className="text-h2 font-medium text-ink-2">{summary || "No one's answered yet"}</p>
       </div>
 
       {GROUPS.map(g => {
@@ -59,7 +63,7 @@ export function Attendance({ state }: { state: EventState }) {
           summary={
             <MonoLabel tone="ink-2">
               <StateIcon value="none" size={14} />
-              NO ANSWER ({a.none.length})
+              No answer ({a.none.length})
             </MonoLabel>
           }
         >

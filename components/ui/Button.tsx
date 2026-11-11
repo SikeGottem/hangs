@@ -30,7 +30,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
 
 export function buttonClasses({ variant = 'primary', size = 'md', fullWidth, className }: Pick<ButtonProps, 'variant' | 'size' | 'fullWidth' | 'className'>) {
   return cx(
-    'inline-flex select-none items-center justify-center gap-2 whitespace-nowrap font-semibold',
+    'inline-flex select-none items-center justify-center gap-2 whitespace-nowrap font-bold',
     'transition duration-(--dur-fast) ease-(--ease-out) active:scale-[0.97]',
     'disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed',
     size === 'lg' ? 'h-13 px-6 text-base' : 'h-11 px-4 text-md',

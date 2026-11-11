@@ -105,7 +105,7 @@ export function EditDaysSheet({ open, onClose, state, onState }: EditDaysSheetPr
   }
 
   const days = draft.length
-  const counter = parts ? `${days} ${plural(days, 'DAY', 'DAYS')} × 3 = ${days * 3} OPTIONS` : `${days} ${plural(days, 'DAY', 'DAYS')}`
+  const counter = parts ? `${days} ${plural(days, 'day', 'days')} × 3 = ${days * 3} options` : `${days} ${plural(days, 'day', 'days')}`
 
   return (
     <Sheet
@@ -143,7 +143,7 @@ export function EditDaysSheet({ open, onClose, state, onState }: EditDaysSheetPr
       {open && (
         <div className="flex flex-col gap-3 pt-1">
           <div className="flex items-center justify-between gap-3">
-            <MonoLabel id={labelId} tone="ink-3">PICK SOME DAYS</MonoLabel>
+            <MonoLabel id={labelId} tone="ink-3">Pick some days</MonoLabel>
             <span aria-live="polite" className="mono-label tabular text-ink-2">{counter}</span>
           </div>
           <CalendarPicker

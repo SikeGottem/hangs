@@ -9,7 +9,7 @@ import { organiserLink } from '@/lib/share'
 import { EditDaysSheet } from './EditDaysSheet'
 import { EditDetailsForm } from './EditDetailsForm'
 import { optionLabel, useOrganiserKey } from './hooks'
-import type { OrganiserBaseProps } from './LockCta'
+import type { OrganiserBaseProps } from './hooks'
 import { LockSheet } from './LockSheet'
 import { ResponsesManager } from './ResponsesManager'
 import { UnlockControl } from './UnlockControl'
@@ -45,11 +45,11 @@ export function OrganiserMenu({ state, onState }: OrganiserMenuProps) {
       <Sheet open={open === 'menu'} onClose={close} title="Organiser tools">
         {open === 'menu' && (
           <div className="flex flex-col gap-5">
-            <Section label="DETAILS">
+            <Section label="Details">
               <EditDetailsForm state={state} onState={onState} />
             </Section>
 
-            <Section label="DAYS">
+            <Section label="Days">
               <p className="text-md text-ink-2">
                 {dates} {plural(dates, 'day', 'days')} on the table{parts ? ', 3 parts each' : ''}.
               </p>
@@ -58,11 +58,11 @@ export function OrganiserMenu({ state, onState }: OrganiserMenuProps) {
               </Button>
             </Section>
 
-            <Section label="ANSWERS">
+            <Section label="Answers">
               <ResponsesManager state={state} onState={onState} />
             </Section>
 
-            <Section label="ORGANISER LINK">
+            <Section label="Organiser link">
               <p className="text-md text-ink-2">
                 Keep this private. It lets you manage this plan from another phone or laptop.
               </p>
@@ -79,7 +79,7 @@ export function OrganiserMenu({ state, onState }: OrganiserMenuProps) {
             </Section>
 
             {!lock && (
-              <Section label="LOCK">
+              <Section label="Lock">
                 <p className="text-md text-ink-2">Already know the day? You can lock it in now, even before anyone answers.</p>
                 <Button variant="secondary" iconLeft={Lock} onClick={() => setOpen('lock-new')} className="self-start">
                   Lock a day
@@ -88,7 +88,7 @@ export function OrganiserMenu({ state, onState }: OrganiserMenuProps) {
             )}
 
             {lock && (
-              <Section label="LOCK">
+              <Section label="Lock">
                 <p className="text-md text-ink">
                   {optionLabel(lock, state.today)}, {lock.time ? formatTime(lock.time) : 'time TBC'}
                   {lock.place ? ` at ${lock.place}` : ''}

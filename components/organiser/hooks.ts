@@ -4,7 +4,9 @@
 import { useSyncExternalStore } from 'react'
 import { readIdentity } from '@/lib/client'
 import { formatOption } from '@/lib/format'
-import type { EventOption } from '@/lib/types'
+import type { EventOption, EventState } from '@/lib/types'
+
+export interface OrganiserBaseProps { state: EventState; onState: (next: EventState) => void }
 
 function subscribeStorage(cb: () => void) {
   window.addEventListener('storage', cb)

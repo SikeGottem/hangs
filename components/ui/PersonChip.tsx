@@ -25,7 +25,7 @@ export function PersonChip({ name, value, isYou, isOrganiser, trailing, classNam
         {name}
         {isYou && <span className="text-ink-3"> (you)</span>}
       </span>
-      {isOrganiser && <span className="mono-label shrink-0 text-ink-3">ORGANISER</span>}
+      {isOrganiser && <span className="mono-label shrink-0 text-ink-3">Organiser</span>}
       {trailing}
     </span>
   )

@@ -25,15 +25,16 @@ Next.js 16.2 App Router, React 19, Tailwind v4 (tokens in `app/globals.css`), li
 ## Layout
 - `lib/` pure logic + server repository (`events.ts`, `db.ts`, `http.ts`, `ratelimit.ts`, `tokens.ts`, `site.ts` are server-only). `lib/client/` is browser-only (`storage.ts`, `api.ts`, `useEvent.ts`, re-exported from `@/lib/client`).
 - `app/api/events/**` route handlers. `app/h/[id]` event page. `app/page.tsx` create screen.
-- `components/ui/` shared primitives (barrel `@/components/ui`). `components/create`, `components/event`, `components/organiser`, `components/locked` are feature folders.
+- `components/ui/` shared primitives (barrel `@/components/ui`). `components/create`, `components/event`, `components/organiser`, `components/locked` are feature folders. The event page is one of four posters: `SharePoster`, `AnswerFlow`, `ResultPoster`, `LockedInvitation`, all built on `DayGrid`.
 
 ## Conventions
 - Every new file starts with a one-line comment saying what it does.
 - Colours, radii, shadows and font sizes come only from tokens. `npm run lint` runs `scripts/check-tokens.mjs`, which fails on raw hex, `rgb()`, or Tailwind arbitrary colours/radii/font sizes/line heights in `app/**` and `components/**` (only `app/globals.css` is exempt). OG/icon code imports colours from `lib/brand.ts`.
-- Type scale: body `text-sm` / `text-md` / `text-base`; Jakarta headings `text-h3` (17) / `text-h2` (20, section headings) / `text-xl` (22, sheet titles) / `text-hero` (24) / `text-2xl` (28, page titles) / `text-display` (32) / `text-date` (40); metadata uses the `mono-label` utility.
+- Look: full-bleed poster colours in Bricolage Grotesque. `components/event/Poster.tsx` sets the two poster colours and `.poster` in `globals.css` remaps every token to them, so shared controls work on any colour (sheets reset to black on white). Each date's colour comes from `lib/poster.ts`.
+- Type scale: body `text-md` / `text-lg` / `text-h2`; headings `text-display` / `text-3xl`; poster sizes `text-weekday` / `text-day` / `text-day-sm` / `text-title`.
 - Browser-only values (origin, mounted flag, in-app browser, reduced motion) come from `components/ui/hooks.ts` via `useSyncExternalStore`; never `setState` in an effect to read them.
 - The viewer's temporary pre-join person has id `LOCAL_PERSON_ID` (`lib/state.ts`); use the constant, and exclude it from "others" counts.
-- Yellow (accent) is for the single next action, chosen by `lib/next-action.ts`.
+- Each screen has one solid main button (`PosterButton`); yellow appears only on the create and share posters.
 - No emoji in UI or generated messages. Icons are lucide-react. Colour is never the only signal.
 - Australian English copy.
 

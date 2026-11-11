@@ -18,13 +18,13 @@ export function ConnectionBanner({ connection, pollFailures, className }: Connec
       {offline && (
         <p className="mono-label flex items-center gap-2 rounded-md bg-sunken px-3 py-2.5 text-ink-2">
           <WifiOff aria-hidden size={14} className="shrink-0" />
-          OFFLINE · ANSWERS WILL SAVE WHEN YOU&apos;RE BACK
+          Offline. Answers will save when you&apos;re back.
         </p>
       )}
       {stale && (
         <p className="mono-label flex items-center gap-2 rounded-md bg-sunken px-3 py-2.5 text-ink-2">
           <RefreshCw aria-hidden size={14} className="shrink-0" />
-          COULDN&apos;T REFRESH · RETRYING
+          Couldn&apos;t refresh. Retrying.
         </p>
       )}
     </div>

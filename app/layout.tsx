@@ -1,6 +1,6 @@
-// Root layout: fonts (Jakarta / Inter / JetBrains Mono), global tokens, site metadata, the hash-secret capture and the toast provider.
+// Root layout: font (Bricolage Grotesque), global tokens, site metadata, the hash-secret capture and the toast provider.
 import type { Metadata, Viewport } from 'next'
-import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
+import { Bricolage_Grotesque } from 'next/font/google'
 import type { ReactNode } from 'react'
 import { ToastProvider } from '@/components/ui/Toast'
 import { BRAND } from '@/lib/brand'
@@ -8,9 +8,7 @@ import { HASH_CAPTURE_SCRIPT } from '@/lib/hash-capture'
 import { siteUrl } from '@/lib/site'
 import './globals.css'
 
-const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], weight: ['600', '700', '800'], variable: '--font-jakarta', display: 'swap' })
-const inter = Inter({ subsets: ['latin'], weight: ['400', '600'], variable: '--font-inter', display: 'swap' })
-const jbmono = JetBrains_Mono({ subsets: ['latin'], weight: ['500'], variable: '--font-jbmono', display: 'swap' })
+const bricolage = Bricolage_Grotesque({ subsets: ['latin'], variable: '--font-bricolage', display: 'swap' })
 
 // metadataBase is the configured site URL; only when none is set (local runs) does it follow the request's host.
 export async function generateMetadata(): Promise<Metadata> {
@@ -24,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export const viewport: Viewport = {
-  themeColor: BRAND.bg,
+  themeColor: BRAND.day1,
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
@@ -32,7 +30,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en-AU" className={`${jakarta.variable} ${inter.variable} ${jbmono.variable}`}>
+    <html lang="en-AU" className={bricolage.variable}>
       <body className="bg-bg font-sans text-ink antialiased">
         <script dangerouslySetInnerHTML={{ __html: HASH_CAPTURE_SCRIPT }} />
         <ToastProvider>{children}</ToastProvider>

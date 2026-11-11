@@ -16,6 +16,7 @@ export interface LockSheetProps {
   state: EventState
   onState: (next: EventState) => void
   mode: 'lock' | 'edit'
+  preselect?: string   // option to start on when locking (the day being looked at)
 }
 
 const VISIBLE = 10
@@ -30,12 +31,12 @@ function candidatesFor(state: EventState, editing: boolean): RankedOption[] {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || PART_ORDER[a.part] - PART_ORDER[b.part])
 }
 
-function initialDraft(state: EventState, editing: boolean): Draft {
+function initialDraft(state: EventState, editing: boolean, preselect?: string): Draft {
   const lock = state.event.lock
   const candidates = candidatesFor(state, editing)
   const optionId = editing && lock
     ? lock.optionId
-    : candidates.find(o => o.optionId === state.ranking.topOptionIds[0])?.optionId ?? candidates[0]?.optionId ?? ''
+    : candidates.find(o => o.optionId === preselect)?.optionId ?? candidates.find(o => o.optionId === state.ranking.topOptionIds[0])?.optionId ?? candidates[0]?.optionId ?? ''
   return {
     optionId,
     time: editing && lock ? lock.time ?? '' : '',
@@ -46,12 +47,12 @@ function initialDraft(state: EventState, editing: boolean): Draft {
 
 const capitalise = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s)
 
-export function LockSheet({ open, onClose, state, onState, mode }: LockSheetProps) {
+export function LockSheet({ open, onClose, state, onState, mode, preselect }: LockSheetProps) {
   const { toast } = useToast()
   const formId = useId()
   const editing = mode === 'edit' && !!state.event.lock
 
-  const [draft, setDraft] = useState<Draft>(() => initialDraft(state, editing))
+  const [draft, setDraft] = useState<Draft>(() => initialDraft(state, editing, preselect))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -60,7 +61,7 @@ export function LockSheet({ open, onClose, state, onState, mode }: LockSheetProp
   if (open !== wasOpen) {
     setWasOpen(open)
     if (open) {
-      setDraft(initialDraft(state, editing))
+      setDraft(initialDraft(state, editing, preselect))
       setError(null)
       setBusy(false)
     }
@@ -144,7 +145,7 @@ export function LockSheet({ open, onClose, state, onState, mode }: LockSheetProp
         >
           <fieldset className="flex min-w-0 flex-col gap-2">
             <legend className="mb-2">
-              <MonoLabel tone="ink-3">WHICH DAY</MonoLabel>
+              <MonoLabel tone="ink-3">Which day</MonoLabel>
             </legend>
             {shown.map(o => {
               const checked = o.optionId === draft.optionId
@@ -174,14 +175,14 @@ export function LockSheet({ open, onClose, state, onState, mode }: LockSheetProp
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="flex min-w-0 items-baseline gap-2">
                       <span className="truncate font-display text-base font-bold tracking-display text-ink">{optionLabel(o, state.today)}</span>
-                      {o.optionId === lockedId && <span className="mono-label shrink-0 text-ink-3">LOCKED</span>}
+                      {o.optionId === lockedId && <span className="mono-label shrink-0 text-ink-3">Locked</span>}
                       {o.optionId !== lockedId && badged.has(o.optionId) && (
-                        <span className={cx('mono-label shrink-0 rounded-sm px-1', badge === 'BEST' ? 'bg-ink text-white' : 'bg-sunken text-ink-2')}>{badge}</span>
+                        <span className={cx('mono-label shrink-0 rounded-sm px-1', badge === 'BEST' ? 'bg-ink text-white' : 'bg-sunken text-ink-2')}>{badge === 'BEST' ? 'Best' : 'Tied'}</span>
                       )}
                     </span>
                     {/* Each count stays whole; a wrap never strands a word or a separator. */}
                     <span className="mono-label tabular flex flex-wrap gap-x-3 text-ink-3">
-                      {(tallyParts(o).length ? tallyParts(o) : ['NO ANSWERS YET']).map(t => (
+                      {(tallyParts(o).length ? tallyParts(o).map(t => t.toLowerCase()) : ['no answers yet']).map(t => (
                         <span key={t} className="whitespace-nowrap">{t}</span>
                       ))}
                     </span>

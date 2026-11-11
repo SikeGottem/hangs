@@ -1,17 +1,17 @@
-/* Hangs v2 design tokens (Amie Calendar x Field Notes) and global base styles. Components use only these tokens. */
+/* Hangs design tokens (full-colour poster look) and global base styles. Components use only these tokens. */
 @import "tailwindcss";
 
 @theme {
   --color-*: initial;
-  --color-bg: #FAF8F3;          --color-surface: #FFFFFF;
-  --color-sunken: #F2EEE6;      --color-hover: #ECE6DA;
-  --color-ink: #1A1915;         --color-ink-2: #55514A;   --color-ink-3: #6B665D;  /* ink-3 >= 4.5:1 on bg */
-  --color-line: #E6E0D4;        --color-line-strong: #CBC2B2;   /* decorative dividers only */
-  --color-control-border: #8A8374;   /* input and unselected answer edges: >= 3:1 on surface and bg */
-  --color-accent: #F5C842;      --color-accent-press: #E8B92C;  --color-on-accent: #1A1915;
-  --color-free: #23804A;        --color-free-bg: #E4F3E9;  --color-free-ink: #1B6B3D;  --color-on-free: #FFFFFF;
-  --color-maybe: #9A6A12;       --color-maybe-bg: #FAF0DC; --color-maybe-ink: #6F4C0B;
-  --color-cant: #6B655B;        --color-cant-bg: #EDE9E2;  --color-cant-ink: #55514A;  --color-on-cant: #FFFFFF;
+  --color-bg: #FFFFFF;          --color-surface: #FFFFFF;
+  --color-sunken: #F1F1EE;      --color-hover: #E8E8E4;
+  --color-ink: #111111;         --color-ink-2: #454545;   --color-ink-3: #666666;
+  --color-line: #E2E2DE;        --color-line-strong: #BDBDB8;
+  --color-control-border: #858580;
+  --color-accent: #F5B700;      --color-accent-press: #DFA600;  --color-on-accent: #111111;
+  --color-free: #0B5D3F;        --color-free-bg: #DFF0E9;  --color-free-ink: #0B5D3F;  --color-on-free: #FFFFFF;
+  --color-maybe: #8A5A00;       --color-maybe-bg: #FBEFD0; --color-maybe-ink: #6B4600;
+  --color-cant: #666666;        --color-cant-bg: #ECECE8;  --color-cant-ink: #454545;  --color-on-cant: #FFFFFF;
   --color-danger: #B42318;      --color-danger-bg: #FCEBE9;
   --color-white: #FFFFFF;
   --color-transparent: transparent;
@@ -28,10 +28,17 @@
   --text-mono: 0.75rem; --text-mono--line-height: 1rem; --text-mono--letter-spacing: 0.06em;
   --text-xs: 0.75rem; --text-sm: 0.875rem; --text-base: 1rem; --text-md: 0.9375rem;
   --text-lg: 1.125rem; --text-xl: 1.375rem; --text-2xl: 1.75rem; --text-3xl: 2.25rem; --text-4xl: 2.75rem;
-  /* Display scale (Jakarta headings): h3 17, h2 20, hero 24, display 32, date 40. */
+  /* Display scale: h3 17, h2 20, hero 24, display 32, date 40; poster sizes scale with the screen. */
   --text-h3: 1.0625rem; --text-h2: 1.25rem; --text-hero: 1.5rem; --text-display: 2rem; --text-date: 2.5rem;
-  --tracking-display: -0.025em;
+  --text-weekday: clamp(2.25rem, 6.5dvh, 3rem);
+  --text-day: clamp(6rem, min(44vw, 21dvh), 11rem);
+  --text-day-sm: clamp(5rem, min(38vw, 17dvh), 9.5rem);
+  --text-title: clamp(2.25rem, 12vw, 3.25rem);
+  --tracking-display: -0.03em;
+  --tracking-poster: -0.05em;
   --leading-display: 1.1;
+  --leading-poster: 0.86;
+  --tracking-day: -0.06em;
 
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
@@ -54,12 +61,20 @@
   }
 }
 @theme inline {
-  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jbmono), ui-monospace, monospace;
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
 }
 :root {
   color-scheme: light;
+  /* Poster colours: each day gets one, with its readable text colour. */
+  --color-day-1: #1B3FD1;       --color-on-day-1: #FFFFFF;
+  --color-day-2: #F5B700;       --color-on-day-2: #111111;
+  --color-day-3: #0B5D3F;       --color-on-day-3: #FFFFFF;
+  --color-day-4: #C8321A;       --color-on-day-4: #FFFFFF;
+  --color-day-5: #5B1F6E;       --color-on-day-5: #FFFFFF;
+  --color-night: #111111;       --color-on-night: #FFFFFF;
+
   --gutter: 16px; --page-max: 1080px; --col-max: 600px; --tap: 44px;
   --create-side: 25rem; --create-gap: 4rem;   /* create page desktop: calendar column and column gap */
   --bar-h: 0px;   /* height of the mounted sticky bottom bar (set by StickyBar); toasts and focus scroll-margins clear it */
@@ -77,16 +92,43 @@ html {
   scroll-margin-bottom: calc(var(--bar-h) + 1rem);
 }
 body { min-height: 100dvh; }
-input, textarea, select { font-size: max(16px, 1rem); }          /* no iOS zoom */
 /* In the base layer so focus-visible:* utilities (e.g. white rings on dark toasts) can override it. */
 @layer base {
+  input, textarea, select { font-size: max(16px, 1rem); }          /* no iOS zoom; utilities can only make it bigger */
   :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
 }
 button, [role="button"], summary { -webkit-tap-highlight-color: transparent; }
-@utility mono-label { font-family: var(--font-mono); font-size: var(--text-mono); line-height: 1rem; letter-spacing: 0.06em; text-transform: uppercase; }
+@utility mono-label { font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.25rem; font-weight: 700; }
 @utility tabular { font-variant-numeric: tabular-nums; }
 @utility hatch-maybe { background-image: repeating-linear-gradient(135deg, var(--color-maybe) 0 2px, transparent 2px 6px); }
 @utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+/* Inside a poster every token follows the poster's own two colours, so shared controls just work on any background. */
+.poster {
+  --color-bg: var(--poster-bg); --color-surface: transparent;
+  --color-sunken: color-mix(in srgb, var(--poster-fg) 14%, transparent);
+  --color-hover: color-mix(in srgb, var(--poster-fg) 16%, transparent);
+  --color-ink: var(--poster-fg); --color-ink-2: var(--poster-fg); --color-ink-3: var(--poster-fg);
+  --color-line: color-mix(in srgb, var(--poster-fg) 35%, transparent); --color-line-strong: var(--poster-fg);
+  --color-control-border: var(--poster-fg);
+  --color-accent: var(--poster-accent, var(--poster-fg)); --color-accent-press: var(--poster-accent, var(--poster-fg));
+  --color-on-accent: var(--poster-on-accent, var(--poster-bg));
+  --color-free: var(--poster-fg); --color-free-ink: var(--poster-fg); --color-free-bg: var(--color-sunken); --color-on-free: var(--poster-bg);
+  --color-maybe: var(--poster-fg); --color-maybe-ink: var(--poster-fg); --color-maybe-bg: var(--color-sunken);
+  --color-cant: var(--poster-fg); --color-cant-ink: var(--poster-fg); --color-cant-bg: var(--color-sunken); --color-on-cant: var(--poster-bg);
+  --color-danger: var(--poster-fg); --color-danger-bg: var(--color-sunken);
+  --color-white: var(--poster-bg);
+}
+/* Sheets open over the poster and go back to plain black on white. */
+.poster dialog {
+  --color-bg: #FFFFFF; --color-surface: #FFFFFF; --color-sunken: #F1F1EE; --color-hover: #E8E8E4;
+  --color-ink: #111111; --color-ink-2: #454545; --color-ink-3: #666666;
+  --color-line: #E2E2DE; --color-line-strong: #BDBDB8; --color-control-border: #858580;
+  --color-accent: #F5B700; --color-accent-press: #DFA600; --color-on-accent: #111111;
+  --color-free: #0B5D3F; --color-free-ink: #0B5D3F; --color-free-bg: #DFF0E9; --color-on-free: #FFFFFF;
+  --color-maybe: #8A5A00; --color-maybe-ink: #6B4600; --color-maybe-bg: #FBEFD0;
+  --color-cant: #666666; --color-cant-ink: #454545; --color-cant-bg: #ECECE8; --color-on-cant: #FFFFFF;
+  --color-danger: #B42318; --color-danger-bg: #FCEBE9; --color-white: #FFFFFF;
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }

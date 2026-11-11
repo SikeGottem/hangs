@@ -5,7 +5,7 @@ import { CircleAlert, LockOpen } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button, cx, useToast } from '@/components/ui'
 import { unlockEvent } from '@/lib/client'
-import type { OrganiserBaseProps } from './LockCta'
+import type { OrganiserBaseProps } from './hooks'
 
 export function UnlockControl({ state, onState, onDone, className }: OrganiserBaseProps & { onDone?: () => void; className?: string }) {
   const { toast, clear: clearToast } = useToast()

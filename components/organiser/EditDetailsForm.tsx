@@ -4,7 +4,7 @@
 import { useId, useState } from 'react'
 import { Button, Field, TextArea, TextInput, useToast } from '@/components/ui'
 import { updateEventDetails } from '@/lib/client'
-import type { OrganiserBaseProps } from './LockCta'
+import type { OrganiserBaseProps } from './hooks'
 
 const tidy = (s: string) => s.replace(/\s+/g, ' ').trim()
 

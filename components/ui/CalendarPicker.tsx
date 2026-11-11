@@ -1,7 +1,7 @@
 // CalendarPicker: inline month grid for picking candidate days (tap toggles, mouse drag-paints, arrows/Home/End/PageUp/PageDown move focus).
 'use client'
 
-import { Check, ChevronLeft, ChevronRight, Lock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Lock } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { addDays, monthGrid, parseDate } from '@/lib/dates'
 import { monthYearLabel, MONTHS_LONG, weekdayLong } from '@/lib/format'
@@ -197,7 +197,7 @@ export function CalendarPicker({
   return (
     <div className={cx('select-none', className)}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 aria-live="polite" className="pl-1 font-display text-h3 font-bold tracking-display text-ink">
+        <h3 aria-live="polite" className="font-display text-hero font-extrabold tracking-display whitespace-nowrap text-ink">
           {monthYearLabel(year, month0)}
         </h3>
         <div className="flex items-center">
@@ -208,20 +208,20 @@ export function CalendarPicker({
       <div role="grid" aria-labelledby={labelledBy} aria-label={labelledBy ? undefined : 'Pick days'} className="w-full">
         <div role="row" className="grid grid-cols-7">
           {WEEKDAYS.map((w, i) => (
-            <span key={i} role="columnheader" aria-label={WEEKDAY_NAMES[i]} className="mono-label py-1.5 text-center text-ink-3">{w}</span>
+            <span key={i} role="columnheader" aria-label={WEEKDAY_NAMES[i]} className="py-1 text-center text-sm font-medium text-ink">{w}</span>
           ))}
         </div>
         {grid.map((row, ri) => (
           <div key={ri} role="row" className="grid grid-cols-7 gap-y-1">
             {row.map(cell => {
-              if (!cell.inMonth) return <span key={cell.date} role="gridcell" aria-hidden className="aspect-square min-h-11" />
+              if (!cell.inMonth) return <span key={cell.date} role="gridcell" aria-hidden className="min-h-11" />
               const d = cell.date
               const isSel = selected.has(d)
               const isPin = pinnedSet.has(d)
               const disabled = isDisabled(d)
               const isToday = d === today
               return (
-                <span key={d} role="gridcell" className="flex aspect-square min-h-11 items-center justify-center">
+                <span key={d} role="gridcell" className="flex min-h-11 items-center justify-center p-0.5">
                   <button
                     ref={el => { if (el) cellRefs.current.set(d, el); else cellRefs.current.delete(d) }}
                     type="button"
@@ -239,24 +239,15 @@ export function CalendarPicker({
                     onFocus={() => setFocusDate(d)}
                     onKeyDown={e => onKeyDown(e, d)}
                     className={cx(
-                      'group flex h-full w-full items-center justify-center rounded-full p-1 text-md font-semibold tabular',
-                      disabled ? 'cursor-not-allowed text-ink-3' : isSel ? 'text-white' : 'text-ink',
+                      'flex h-11 w-full items-center justify-center rounded-md border-2 text-h2 tabular transition-colors duration-(--dur-fast)',
+                      disabled ? 'cursor-not-allowed border-transparent font-medium text-ink-3 opacity-70' : 'font-extrabold',
+                      !disabled && (isSel ? 'border-ink bg-ink text-white' : 'border-ink text-ink hover:bg-hover'),
+                      isToday && !isSel && 'underline underline-offset-4',
                     )}
                   >
-                    {/* The whole cell is the tap target; the visible circle is inset so neighbouring picks stay apart. */}
-                    <span
-                      className={cx(
-                        'relative flex h-full w-full items-center justify-center rounded-full transition-colors duration-(--dur-fast)',
-                        disabled ? 'line-through' : isSel ? 'bg-ink pb-2' : 'group-hover:bg-hover',  // pb: room for the check under the number
-                        isToday && !isSel && 'ring-1 ring-ink ring-inset',
-                      )}
-                    >
+                    <span className="inline-flex items-center gap-0.5">
                       {parseDate(d).day}
-                      {isSel && (
-                        <span aria-hidden className="absolute bottom-0.5 left-1/2 inline-flex -translate-x-1/2">
-                          {isPin ? <Lock size={10} strokeWidth={3} /> : <Check size={10} strokeWidth={3} />}
-                        </span>
-                      )}
+                      {isPin && isSel && <Lock aria-hidden size={11} strokeWidth={3} />}
                     </span>
                   </button>
                 </span>
