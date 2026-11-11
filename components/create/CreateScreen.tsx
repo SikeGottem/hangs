@@ -7,9 +7,9 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { CalendarPicker, cx, prefersReducedMotion, useMounted, useToast, Wordmark } from '@/components/ui'
-import { Poster, PosterButton, PosterLink } from '@/components/event/Poster'
+import { Poster, PosterButton, PosterFoot, PosterLink } from '@/components/event/Poster'
 import { createEvent, getRememberedName } from '@/lib/client'
-import { isValidTimeZone, nextWeekends, todayIn } from '@/lib/dates'
+import { addDays, isValidTimeZone, nextDays, nextWeekends, todayIn } from '@/lib/dates'
 import { plural } from '@/lib/format'
 import { COBALT } from '@/lib/poster'
 import type { EventMode } from '@/lib/types'
@@ -49,7 +49,10 @@ export function CreateScreen() {
   const [title, setTitle] = useState('')
   const [note, setNote] = useState('')
   const [nameDraft, setNameDraft] = useState<string | null>(null)
-  const name = nameDraft ?? (mounted ? getRememberedName() : '')
+  const remembered = mounted ? getRememberedName() : ''
+  const name = nameDraft ?? remembered
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [editingName, setEditingName] = useState(false)
   const [dates, setDates] = useState<string[]>([])
   const [mode, setMode] = useState<EventMode>('days')
   const [viewDate, setViewDate] = useState<string | undefined>(undefined)
@@ -147,6 +150,24 @@ export function CreateScreen() {
   const counter = `${n} ${plural(n, 'day', 'days')}`
 
   const weekends = today ? nextWeekends(today, 3) : []
+  const threeWeeks = today ? nextDays(addDays(today, 1), 21) : []
+  const addPreset = (preset: string[]) => onPresetChange([...new Set([...liveDates, ...preset])].sort().slice(0, maxSelected))
+
+  // A remembered name is one line with a "change" link; the field appears only to edit it or to fix an error.
+  const nameAsLine = !editingName && nameDraft === null && nameOk && !nameError
+  const startEditingName = () => {
+    flushSync(() => setEditingName(true))
+    nameRef.current?.focus()
+  }
+  const openNote = () => {
+    flushSync(() => setNoteOpen(true))
+    noteRef.current?.focus()
+  }
+  const buttonLabel = submitting ? 'Making the link'
+    : missing === 'title' ? 'Add what the plan is'
+      : missing === 'dates' ? 'Pick some days'
+        : missing === 'name' ? 'Add your name'
+          : 'Send to the group'
   const inputLine = 'w-full bg-transparent outline-none placeholder:text-current placeholder:opacity-70 focus-visible:outline-none'
 
   return (
@@ -178,69 +199,95 @@ export function CreateScreen() {
           />
           {titleError && <FormError id="title-error">{titleError}</FormError>}
 
-          <label className="flex min-h-11 items-center gap-3 border-b-2 border-current">
-            <span className="sr-only">Where, or a note (optional)</span>
-            <input
-              ref={noteRef}
-              id="create-note"
-              name="note"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              onKeyDown={e => onEnter(e, () => noteRef.current?.blur())}
-              placeholder="Where, or a note (optional)"
-              maxLength={140}
-              autoComplete="off"
-              autoCapitalize="sentences"
-              enterKeyHint="done"
-              className={cx(inputLine, 'text-lg font-medium')}
-            />
-          </label>
+          {noteOpen || note ? (
+            <label className="flex min-h-11 items-center gap-3 border-b-2 border-current">
+              <span className="sr-only">Where, or a note (optional)</span>
+              <input
+                ref={noteRef}
+                id="create-note"
+                name="note"
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                onKeyDown={e => onEnter(e, () => noteRef.current?.blur())}
+                placeholder="Where, or a note (optional)"
+                maxLength={140}
+                autoComplete="off"
+                autoCapitalize="sentences"
+                enterKeyHint="done"
+                className={cx(inputLine, 'text-lg font-medium')}
+              />
+            </label>
+          ) : (
+            <div><PosterLink onClick={openNote}>Add a place or note</PosterLink></div>
+          )}
         </div>
 
         <section ref={daysRef} tabIndex={-1} aria-labelledby="days-label" aria-describedby={datesError ? 'days-error' : undefined} className="mt-3 flex scroll-mt-6 flex-col rounded-lg outline-none lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mt-0">
           <h2 id="days-label" className="sr-only">Which days could work?</h2>
+          <div role="group" aria-label="Quick picks" className="mb-3 flex flex-wrap gap-2">
+            {[{ label: 'Next 3 weekends', preset: weekends }, { label: 'Next 3 weeks', preset: threeWeeks }].map(({ label, preset }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => addPreset(preset)}
+                className="min-h-11 rounded-md border-2 border-current px-3 text-md font-extrabold whitespace-nowrap transition duration-(--dur-fast) active:scale-[0.97]"
+              >
+                {label}
+              </button>
+            ))}
+            {n > 0 && (
+              <button type="button" onClick={() => setDates([])} className="min-h-11 rounded-md px-2 text-md font-medium underline underline-offset-4">
+                Clear
+              </button>
+            )}
+          </div>
           {today ? (
             <CalendarPicker value={liveDates} onChange={setDates} today={today} maxSelected={maxSelected} onLimit={onLimit} labelledBy="days-label" viewDate={viewDate} />
           ) : (
             <div aria-hidden className="h-92" />
           )}
           <div className="flex flex-wrap items-center justify-between gap-x-4">
-            <PosterLink onClick={() => onPresetChange([...new Set([...liveDates, ...weekends])].sort().slice(0, maxSelected))}>Next 3 weekends</PosterLink>
-            <span aria-live="polite" className="text-lg font-extrabold tabular">{counter}</span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-x-4">
             <PosterLink onClick={() => changeMode(mode === 'days' ? 'parts' : 'days')} aria-pressed={mode === 'parts'}>
               {mode === 'days' ? 'Ask morning, arvo or evening' : 'Just ask whole days'}
             </PosterLink>
-            {n > 0 && <PosterLink onClick={() => setDates([])}>Clear</PosterLink>}
           </div>
           {datesError && <FormError id="days-error">Tap at least one day on the calendar.</FormError>}
         </section>
 
-        <div className="mt-auto flex flex-col gap-2.5 pt-3 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:self-end">
-          <label className="flex min-h-11 items-center gap-3 border-b-2 border-current">
-            <span className="text-lg font-medium whitespace-nowrap">Your name</span>
-            <input
-              ref={nameRef}
-              id="create-name"
-              name="name"
-              value={name}
-              onChange={e => setNameDraft(e.target.value)}
-              maxLength={40}
-              autoComplete="given-name"
-              autoCapitalize="words"
-              enterKeyHint="go"
-              aria-invalid={nameError ? true : undefined}
-              aria-describedby={nameError ? 'name-error' : undefined}
-              className={cx(inputLine, 'text-right text-h2 font-extrabold')}
-            />
-          </label>
+        <PosterFoot className="gap-2 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:self-end">
+          <div className="flex min-h-11 items-center justify-between gap-3">
+            <span aria-live="polite" className="text-lg font-extrabold whitespace-nowrap tabular">{counter}</span>
+            {nameAsLine ? (
+              <span className="flex min-w-0 items-center gap-2 text-lg">
+                <span className="truncate">as {name.trim()}</span>
+                <PosterLink onClick={startEditingName} aria-label={`Change your name from ${name.trim()}`}>change</PosterLink>
+              </span>
+            ) : (
+              <label className="flex min-h-11 min-w-0 flex-1 items-center gap-3 border-b-2 border-current">
+                <span className="text-lg font-medium whitespace-nowrap">Your name</span>
+                <input
+                  ref={nameRef}
+                  id="create-name"
+                  name="name"
+                  value={name}
+                  onChange={e => setNameDraft(e.target.value)}
+                  maxLength={40}
+                  autoComplete="given-name"
+                  autoCapitalize="words"
+                  enterKeyHint="go"
+                  aria-invalid={nameError ? true : undefined}
+                  aria-describedby={nameError ? 'name-error' : undefined}
+                  className={cx(inputLine, 'min-w-0 text-right text-h2 font-extrabold')}
+                />
+              </label>
+            )}
+          </div>
           {nameError && <FormError id="name-error">{nameError}</FormError>}
           {apiError && <FormError>{apiError}</FormError>}
           <PosterButton type="submit" loading={submitting} className="w-full">
-            {submitting ? 'Making the link' : 'Send to the group'}
+            {buttonLabel}
           </PosterButton>
-        </div>
+        </PosterFoot>
       </form>
 
       <RecentHangs className="mt-8 lg:max-w-[calc(50%-2rem)]" />

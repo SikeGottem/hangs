@@ -3,7 +3,9 @@
 
 import { useEffect } from 'react'
 import { RotateCcw } from 'lucide-react'
-import { Button, Wordmark } from '@/components/ui'
+// Direct imports: the barrel would pull every UI component (calendar, icons) into each page's error bundle.
+import { Button } from '@/components/ui/Button'
+import { Wordmark } from '@/components/ui/Wordmark'
 
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {

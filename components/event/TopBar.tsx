@@ -2,10 +2,16 @@
 'use client'
 
 import { Share2 } from 'lucide-react'
-import { OrganiserMenu } from '@/components/organiser'
+import dynamic from 'next/dynamic'
 import { IconButton, useToast } from '@/components/ui'
 import { buildInviteMessage, buildLockedMessage, eventUrl, lockedEventUrl, shareOrCopy } from '@/lib/share'
 import type { EventState } from '@/lib/types'
+
+// The organiser's tools (and all their sheets) load only for the organiser; guests never download them.
+const OrganiserMenu = dynamic(() => import('@/components/organiser/OrganiserMenu').then(m => m.OrganiserMenu), {
+  ssr: false,
+  loading: () => <span aria-hidden className="inline-block size-11" />,
+})
 
 export interface TopBarProps {
   state: EventState

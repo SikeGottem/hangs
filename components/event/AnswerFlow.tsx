@@ -10,8 +10,9 @@ import { dayColour, NIGHT } from '@/lib/poster'
 import { parseDate } from '@/lib/dates'
 import type { AnswerValue, ApiError, ApiResult, EventOption, EventState, JoinResponse, SaveStatus as SaveStatusValue } from '@/lib/types'
 import { DayGrid, type DayCell } from './DayGrid'
+import { MANY_DATES, ManyDatesAnswer } from './ManyDatesAnswer'
 import { NameForm } from './NameForm'
-import { Poster, PosterButton, PosterLink } from './Poster'
+import { Poster, PosterButton, PosterFoot, PosterLink } from './Poster'
 import { TopBar } from './TopBar'
 
 export interface AnswerFlowProps {
@@ -122,6 +123,26 @@ export function AnswerFlow({
   const parts = state.event.mode === 'parts'
   const saveError = saveStatus === 'error'
 
+  // Lots of whole days: one calendar where every day starts free and you mark the ones you can't do.
+  if (!parts && future.length > MANY_DATES && !naming) {
+    return (
+      <ManyDatesAnswer
+        state={state}
+        origin={origin}
+        onState={onState}
+        onShared={onShared}
+        options={future}
+        myAnswers={myAnswers}
+        saveStatus={saveStatus}
+        onRetry={onRetry}
+        onSend={answers => {
+          setAnswers(answers)
+          setFinishing(true)
+        }}
+      />
+    )
+  }
+
   return (
     <Poster colour={colour}>
       <TopBar state={state} origin={origin} onState={onState} onShared={onShared} />
@@ -158,6 +179,7 @@ export function AnswerFlow({
               <p className="mt-2 text-h2 leading-snug font-medium text-pretty">{othersPhrase(others, state.ranking.respondentCount)}</p>
             </div>
 
+            <PosterFoot className="gap-0">
             {saveError && (
               <div role="alert" className="mb-2 flex items-center justify-between gap-3 text-lg">
                 <span className="inline-flex items-center gap-2"><CircleAlert aria-hidden size={20} />Couldn&apos;t save that.</span>
@@ -196,6 +218,7 @@ export function AnswerFlow({
                 <SaveStatus status={saveStatus === 'error' || saveStatus === 'unsaved' ? 'idle' : saveStatus} />
               )}
             </div>
+            </PosterFoot>
           </div>
         )}
       </div>

@@ -2,11 +2,10 @@
 'use client'
 
 import { CalendarPlus, Check, Clock, MapPin, Pencil, Share2, StickyNote } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import dynamic from 'next/dynamic'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button, cx, SaveStatus, useToast } from '@/components/ui'
 import type { OrganiserBaseProps } from '@/components/organiser'
-import { LockSheet } from '@/components/organiser/LockSheet'
-import { UnlockControl } from '@/components/organiser/UnlockControl'
 import { EventFooter } from '@/components/event/EventFooter'
 import { NameForm } from '@/components/event/NameForm'
 import { Poster, PosterButton } from '@/components/event/Poster'
@@ -16,8 +15,12 @@ import { ANSWER_LABELS, formatTime, MONTHS_LONG, PART_LABELS, weekdayLong } from
 import { dayColour, NIGHT } from '@/lib/poster'
 import { buildLockedMessage, lockedEventUrl, shareOrCopy } from '@/lib/share'
 import type { AnswerValue, ApiError, ApiResult, JoinResponse, SaveStatus as SaveStatusValue } from '@/lib/types'
-import { AddToCalendarSheet } from './AddToCalendarSheet'
 import { Attendance } from './Attendance'
+
+// Loaded on demand: the organiser's controls only for the organiser, the calendar sheet only once someone taps it.
+const LockSheet = dynamic(() => import('@/components/organiser/LockSheet').then(m => m.LockSheet), { ssr: false })
+const UnlockControl = dynamic(() => import('@/components/organiser/UnlockControl').then(m => m.UnlockControl), { ssr: false })
+const AddToCalendarSheet = dynamic(() => import('./AddToCalendarSheet').then(m => m.AddToCalendarSheet), { ssr: false })
 
 export interface LockedInvitationProps extends OrganiserBaseProps {
   origin: string
@@ -44,6 +47,12 @@ const CHOICES: AnswerValue[] = ['cant', 'maybe', 'free']
 export function LockedInvitation({ state, origin, onState, viewerAnswer, onAnswer, saveStatus, needsName, defaultName, join, joinError }: LockedInvitationProps) {
   const { toast } = useToast()
   const [calendarOpen, setCalendarOpen] = useState(false)
+  const [calendarUsed, setCalendarUsed] = useState(false)
+  // Fetch the calendar sheet's code once the page has settled, so the first tap opens it straight away.
+  useEffect(() => {
+    const t = setTimeout(() => { void import('./AddToCalendarSheet') }, 2000)
+    return () => clearTimeout(t)
+  }, [])
   const [editOpen, setEditOpen] = useState(false)
   const { event, viewer, today } = state
   const lock = event.lock
@@ -116,7 +125,7 @@ export function LockedInvitation({ state, origin, onState, viewerAnswer, onAnswe
                 )
               })}
             </div>
-            <PosterButton icon={CalendarPlus} onClick={() => setCalendarOpen(true)}>Add to calendar</PosterButton>
+            <PosterButton icon={CalendarPlus} onClick={() => { setCalendarUsed(true); setCalendarOpen(true) }}>Add to calendar</PosterButton>
           </section>
 
           <Attendance state={state} />
@@ -134,7 +143,7 @@ export function LockedInvitation({ state, origin, onState, viewerAnswer, onAnswe
       </article>
       <EventFooter className="mt-6" />
 
-      <AddToCalendarSheet open={calendarOpen} onClose={() => setCalendarOpen(false)} state={state} />
+      {calendarUsed && <AddToCalendarSheet open={calendarOpen} onClose={() => setCalendarOpen(false)} state={state} />}
       {viewer.isOrganiser && <LockSheet open={editOpen} onClose={() => setEditOpen(false)} state={state} onState={onState} mode="edit" />}
     </Poster>
   )
