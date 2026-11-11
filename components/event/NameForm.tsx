@@ -78,7 +78,7 @@ export function NameForm({ organiserName, defaultName, join, joinError, heading 
           <span>
             {error}
             {taken && !moreHelp && <>{' '}<PosterLink className="min-h-0 font-bold" onClick={() => setMoreHelp(true)}>It&apos;s me</PosterLink></>}
-            {taken && moreHelp && ` On the phone or app you used before, open this plan and copy your edit link, then open that link here. Or ask ${organiserName} to remove the old one.`}
+            {taken && moreHelp && ` Open this plan on the phone or app you used before to change your answers. Or ask ${organiserName} to remove the old one so you can start again here.`}
           </span>
         </div>
       )}
