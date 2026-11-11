@@ -23,6 +23,7 @@ export interface DayGridProps {
   label: string
   aside?: string                     // short text at the right of the month line
   className?: string
+  scroll?: boolean                   // long ranges scroll inside the grid after 4 rows (default); false shows every week
 }
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
@@ -34,7 +35,7 @@ function weekStart(date: string): string {
   return addDays(date, -mondayIndex)
 }
 
-export function DayGrid({ dates, cell, onPick, label, aside, className }: DayGridProps) {
+export function DayGrid({ dates, cell, onPick, label, aside, className, scroll = true }: DayGridProps) {
   const refs = useRef(new Map<string, HTMLButtonElement>())
   const scroller = useRef<HTMLDivElement>(null)
 
@@ -75,15 +76,15 @@ export function DayGrid({ dates, cell, onPick, label, aside, className }: DayGri
   return (
     <div role="group" aria-label={label} className={className}>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-lg font-extrabold">{monthLine}</p>
-        {aside && <p className="text-lg font-extrabold tabular">{aside}</p>}
+        <p className="min-w-0 truncate text-lg font-extrabold">{monthLine}</p>
+        {aside && <p className="shrink-0 text-lg font-extrabold whitespace-nowrap tabular">{aside}</p>}
       </div>
       <div aria-hidden className="mt-1 grid grid-cols-7 gap-1.25">
         {WEEKDAYS.map((w, i) => <span key={i} className="flex h-5 items-center justify-center text-sm font-medium">{w}</span>)}
       </div>
       <div
         ref={scroller}
-        className={cx('relative p-1 -m-1 no-scrollbar', weeks.length > MAX_ROWS_VISIBLE && 'max-h-53 overflow-y-auto')}
+        className={cx('relative p-1 -m-1 no-scrollbar', scroll && weeks.length > MAX_ROWS_VISIBLE && 'max-h-53 overflow-y-auto')}
       >
         <div className="grid grid-cols-7 gap-1.25">
           {weeks.flat().map(date => {

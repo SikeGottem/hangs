@@ -71,6 +71,21 @@ export function PosterButton({ kind = 'solid', size = 'lg', icon: Icon, loading,
   )
 }
 
+// The screen's main actions, pinned under the thumb on phones when the page is taller than the screen; plain on desktop.
+export function PosterFoot({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div
+      className={cx(
+        'sticky bottom-0 z-10 -mx-5 mt-auto -mb-[calc(var(--safe-bottom)+1rem)] flex flex-col gap-1 bg-(--poster-bg) px-5 pt-3 pb-[calc(var(--safe-bottom)+1rem)] transition-colors duration-(--dur-sheet) ease-(--ease-out)',
+        'lg:static lg:mx-0 lg:mb-0 lg:bg-transparent lg:px-0 lg:pb-0',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
 export function PosterLink({ className, children, type, ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
