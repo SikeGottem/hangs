@@ -1,64 +1,31 @@
-// App-wide error boundary — catches render crashes in any route that doesn't
-// have its own more-specific error.tsx. Shows a recoverable fallback instead
-// of Next.js's raw stack trace.
-"use client"
-import { useEffect } from "react"
+// Root error boundary: plain explanation plus "Try again" (reset) and "Go home".
+'use client'
 
-export default function AppError({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string }
-  reset: () => void
-}) {
+import { useEffect } from 'react'
+import { RotateCcw } from 'lucide-react'
+import { Button, Wordmark } from '@/components/ui'
+
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error('[hangs] app crashed:', error)
+    console.error(error)
   }, [error])
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', minHeight: '70vh', padding: '48px 24px',
-      textAlign: 'center', gap: 14,
-    }}>
-      <div style={{
-        width: 56, height: 56, borderRadius: '50%',
-        background: '#fef2f2', color: 'var(--error)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 28,
-      }}>
-        ⚠︎
-      </div>
-      <h1 style={{
-        fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800,
-        letterSpacing: '-0.03em', color: 'var(--text-primary)',
-      }}>
-        Something broke
-      </h1>
-      <p style={{ fontSize: 14, color: 'var(--text-secondary)', maxWidth: 340, lineHeight: 1.5 }}>
-        Sorry about that. Try again, or head home. If it keeps happening, send
-        Ethan the code below.
-      </p>
-      {error.digest && (
-        <code style={{
-          fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)',
-          background: 'var(--surface-dim)', padding: '4px 10px', borderRadius: 4,
-        }}>
-          {error.digest}
-        </code>
-      )}
-      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-        <button
-          onClick={reset}
-          className="btn-primary"
-          style={{ padding: '12px 22px', width: 'auto' }}
-        >
-          Try again
-        </button>
-        <a href="/" className="btn-secondary" style={{ padding: '12px 22px', textDecoration: 'none' }}>
-          Home
-        </a>
-      </div>
+    <div className="mx-auto flex min-h-dvh w-full max-w-(--col-max) flex-col px-(--gutter)">
+      <header className="flex h-14 items-center">
+        <Wordmark />
+      </header>
+      <main className="flex flex-1 flex-col justify-center pb-24">
+        <h1 className="font-display text-3xl leading-display font-extrabold tracking-display text-balance text-ink">
+          Something broke on our end.
+        </h1>
+        <p className="mt-3 max-w-md text-base text-ink-2">Your answers are safe. Try again in a moment.</p>
+        {error.digest && <p className="mono-label mt-4 text-ink-3">Ref {error.digest}</p>}
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Button variant="primary" iconLeft={RotateCcw} onClick={() => reset()}>Try again</Button>
+          <Button variant="ghost" href="/">Go home</Button>
+        </div>
+      </main>
     </div>
   )
 }

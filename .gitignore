@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (only the example is committed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,8 +40,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-.env.local
-hangs.db*
 
-# ignore nested node_modules (mcp server, etc.)
+# local databases (v1 and v2) and QA output
+hangs.db*
+hangs-v2.local.db*
+.qa/
+.playwright-cli/
+/output/
+
+# ignore nested node_modules
 node_modules/

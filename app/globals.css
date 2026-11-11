@@ -1,508 +1,134 @@
-/* ============================================================
-   HANGS DESIGN SYSTEM
-   "Amie Calendar + Field Notes notebook"
-   ============================================================ */
+/* Hangs design tokens (full-colour poster look) and global base styles. Components use only these tokens. */
+@import "tailwindcss";
 
+@theme {
+  --color-*: initial;
+  --color-bg: #FFFFFF;          --color-surface: #FFFFFF;
+  --color-sunken: #F1F1EE;      --color-hover: #E8E8E4;
+  --color-ink: #111111;         --color-ink-2: #454545;   --color-ink-3: #666666;
+  --color-line: #E2E2DE;        --color-line-strong: #BDBDB8;
+  --color-control-border: #858580;
+  --color-accent: #F5B700;      --color-accent-press: #DFA600;  --color-on-accent: #111111;
+  --color-free: #0B5D3F;        --color-free-bg: #DFF0E9;  --color-free-ink: #0B5D3F;  --color-on-free: #FFFFFF;
+  --color-maybe: #8A5A00;       --color-maybe-bg: #FBEFD0; --color-maybe-ink: #6B4600;
+  --color-cant: #666666;        --color-cant-bg: #ECECE8;  --color-cant-ink: #454545;  --color-on-cant: #FFFFFF;
+  --color-danger: #B42318;      --color-danger-bg: #FCEBE9;
+  --color-white: #FFFFFF;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --radius-*: initial;
+  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 20px; --radius-2xl: 28px; --radius-full: 9999px;
+
+  --shadow-*: initial;
+  --shadow-1: 0 1px 0 rgb(36 30 20 / 0.06), 0 2px 8px rgb(36 30 20 / 0.04);
+  --shadow-2: 0 1px 0 rgb(36 30 20 / 0.06), 0 12px 32px rgb(36 30 20 / 0.10);
+  --shadow-bar: 0 -1px 0 var(--color-line), 0 -8px 24px rgb(36 30 20 / 0.06);
+
+  --text-mono: 0.75rem; --text-mono--line-height: 1rem; --text-mono--letter-spacing: 0.06em;
+  --text-xs: 0.75rem; --text-sm: 0.875rem; --text-base: 1rem; --text-md: 0.9375rem;
+  --text-lg: 1.125rem; --text-xl: 1.375rem; --text-2xl: 1.75rem; --text-3xl: 2.25rem; --text-4xl: 2.75rem;
+  /* Display scale: h3 17, h2 20, hero 24, display 32, date 40; poster sizes scale with the screen. */
+  --text-h3: 1.0625rem; --text-h2: 1.25rem; --text-hero: 1.5rem; --text-display: 2rem; --text-date: 2.5rem;
+  --text-weekday: clamp(2.25rem, 6.5dvh, 3rem);
+  --text-day: clamp(6rem, min(44vw, 21dvh), 11rem);
+  --text-day-sm: clamp(5rem, min(38vw, 17dvh), 9.5rem);
+  --text-title: clamp(2.25rem, 12vw, 3.25rem);
+  --tracking-display: -0.03em;
+  --tracking-poster: -0.05em;
+  --leading-display: 1.1;
+  --leading-poster: 0.86;
+  --tracking-day: -0.06em;
+
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Motion (all disabled under prefers-reduced-motion below). */
+  --animate-slide-up: slide-up 220ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-fade-in: fade-in 180ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-stamp: stamp 180ms cubic-bezier(0.2, 0, 0, 1) both;
+
+  @keyframes slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes stamp {
+    from { opacity: 0; transform: scale(1.12) rotate(-2deg); }
+    to { opacity: 1; transform: scale(1) rotate(-2deg); }
+  }
+}
+@theme inline {
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+}
 :root {
-  /* Background */
-  --bg: #FAF8F3;
-  --surface: #FFFFFF;
-  --surface-dim: #F2EFE8;
-  --surface-hover: #EDEAE3;
+  color-scheme: light;
+  /* Poster colours: each day gets one, with its readable text colour. */
+  --color-day-1: #1B3FD1;       --color-on-day-1: #FFFFFF;
+  --color-day-2: #F5B700;       --color-on-day-2: #111111;
+  --color-day-3: #0B5D3F;       --color-on-day-3: #FFFFFF;
+  --color-day-4: #C8321A;       --color-on-day-4: #FFFFFF;
+  --color-day-5: #5B1F6E;       --color-on-day-5: #FFFFFF;
+  --color-night: #111111;       --color-on-night: #FFFFFF;
 
-  /* Text */
-  --text: #1A1A1A;
-  --text-primary: #1A1A1A;        /* alias → --text */
-  --text-secondary: #6B6B6B;
-  --text-muted: #767676;          /* darkened from #A3A3A3 — passes WCAG AA at 9-12px */
-
-  /* Accent — ONE yellow, used sparingly. Reserve for the single next action. */
-  --accent: #F5C842;
-  --accent-hover: #E5B832;
-  --accent-text: #1A1A1A;
-
-  /* Availability states */
-  --free: #34C26A;
-  --free-light: #E8F8EE;
-  --free-text: #1a7a3a;           /* on-light text colour for free state */
-  --maybe: #F5C842;
-  --maybe-light: #FEF7E0;
-  --maybe-text: #8a6d10;          /* on-light text colour for maybe state */
-  --busy: #E8E3D9;
-
-  /* Semantic */
-  --success: #34C26A;
-  --warning: #F5C842;
-  --error: #E05252;
-  --error-hover: #C84444;         /* slightly darker --error for hover states */
-  --celebrate: #FF6B2B;
-
-  /* Borders */
-  --border: #E8E3D9;
-  --border-light: #F0EDE6;
-
-  /* Typography — --font-display injected by next/font at runtime */
-  --font-body: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-
-  /* Radii */
-  --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius: 12px;                 /* canonical mid-size; alias for --radius-md */
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
-  --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+  --gutter: 16px; --page-max: 1080px; --col-max: 600px; --tap: 44px;
+  --create-side: 25rem; --create-gap: 4rem;   /* create page desktop: calendar column and column gap */
+  --bar-h: 0px;   /* height of the mounted sticky bottom bar (set by StickyBar); toasts and focus scroll-margins clear it */
+  --dur-fast: 120ms; --dur: 180ms; --dur-sheet: 220ms;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
+@media (min-width: 640px) { :root { --gutter: 24px; } }
 html {
-  -webkit-text-size-adjust: 100%;
+  background: var(--color-bg); -webkit-text-size-adjust: 100%;
 }
-
-body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
+/* Keyboard focus never lands under the sticky bottom bar. This is a scroll-margin on page controls, not a
+   scroll-padding on the page: with padding, focusing or typing in the bar's own input (it is always within the
+   padded strip) made the browser scroll the page toward its in-flow spot at the end on every keystroke. */
+:where(a, button, input, select, textarea, summary, [tabindex]):not([data-sticky-bar] *) {
+  scroll-margin-bottom: calc(var(--bar-h) + 1rem);
 }
-
-/* ── BUTTONS ── */
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px 28px;
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--accent-text);
-  background: var(--accent);
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  width: 100%;
+body { min-height: 100dvh; }
+/* In the base layer so focus-visible:* utilities (e.g. white rings on dark toasts) can override it. */
+@layer base {
+  input, textarea, select { font-size: max(16px, 1rem); }          /* no iOS zoom; utilities can only make it bigger */
+  :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
 }
-.btn-primary:hover { background: var(--accent-hover); box-shadow: var(--shadow-md); }
-.btn-primary:active { transform: scale(0.98); }
-.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
-.btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px 28px;
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all 0.15s ease;
+button, [role="button"], summary { -webkit-tap-highlight-color: transparent; }
+@utility mono-label { font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.25rem; font-weight: 700; }
+@utility tabular { font-variant-numeric: tabular-nums; }
+@utility hatch-maybe { background-image: repeating-linear-gradient(135deg, var(--color-maybe) 0 2px, transparent 2px 6px); }
+@utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+/* Inside a poster every token follows the poster's own two colours, so shared controls just work on any background. */
+.poster {
+  --color-bg: var(--poster-bg); --color-surface: transparent;
+  --color-sunken: color-mix(in srgb, var(--poster-fg) 14%, transparent);
+  --color-hover: color-mix(in srgb, var(--poster-fg) 16%, transparent);
+  --color-ink: var(--poster-fg); --color-ink-2: var(--poster-fg); --color-ink-3: var(--poster-fg);
+  --color-line: color-mix(in srgb, var(--poster-fg) 35%, transparent); --color-line-strong: var(--poster-fg);
+  --color-control-border: var(--poster-fg);
+  --color-accent: var(--poster-accent, var(--poster-fg)); --color-accent-press: var(--poster-accent, var(--poster-fg));
+  --color-on-accent: var(--poster-on-accent, var(--poster-bg));
+  --color-free: var(--poster-fg); --color-free-ink: var(--poster-fg); --color-free-bg: var(--color-sunken); --color-on-free: var(--poster-bg);
+  --color-maybe: var(--poster-fg); --color-maybe-ink: var(--poster-fg); --color-maybe-bg: var(--color-sunken);
+  --color-cant: var(--poster-fg); --color-cant-ink: var(--poster-fg); --color-cant-bg: var(--color-sunken); --color-on-cant: var(--poster-bg);
+  --color-danger: var(--poster-fg); --color-danger-bg: var(--color-sunken);
+  --color-white: var(--poster-bg);
 }
-.btn-secondary:hover { background: var(--surface-dim); }
-
-/* ── REDUCED MOTION ── */
-/* Users who enabled "reduce motion" in their OS settings get near-instant
-   transitions instead of slides/fades/skeleton shimmers. Accessibility
-   baseline — framer-motion also auto-honours this at the component level. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* ── FOCUS VISIBLE (keyboard-only, never mouse) ── */
-/* Keyboard users need a clear focus indicator on every interactive element.
-   :focus-visible fires only on keyboard focus, so mouse clicks stay clean. */
-button:focus-visible,
-a:focus-visible,
-[role="gridcell"]:focus-visible,
-[role="button"]:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-.btn-primary:focus-visible,
-.btn-secondary:focus-visible {
-  outline-offset: 3px;
-}
-
-/* ── INPUTS ── */
-.input {
-  width: 100%;
-  padding: 14px 16px;
-  font-family: var(--font-body);
-  font-size: 16px;
-  color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  outline: none;
-  transition: border-color 0.15s ease;
-}
-.input:focus { border-color: var(--accent); }
-.input::placeholder { color: var(--text-muted); }
-
-/* ── CARDS ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-}
-
-/* ── CHIPS ── */
-.chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 10px 18px;
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--surface-dim);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  user-select: none;
-}
-.chip:hover { background: var(--surface-hover); }
-.chip-active {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
-/* ── LABELS ── */
-.label {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-/* ── SECTION HEADER ── */
-.section-title {
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 800;
-  color: var(--text-primary);
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-}
-
-/* ── PROGRESS DOTS ── */
-.progress-bar { display: flex; gap: 6px; justify-content: center; }
-.progress-dot {
-  height: 4px;
-  width: 32px;
-  border-radius: 2px;
-  background: var(--border);
-  transition: background 0.2s ease;
-}
-.progress-dot-active { background: var(--accent); transform: scaleX(1.1); }
-
-/* ── AVAILABILITY GRID ── */
-.grid-cell {
-  width: 48px;
-  height: 40px;
-  border-radius: 8px;
-  border: 1px solid var(--border-light);
-  cursor: pointer;
-  transition: all 0.1s ease;
-  position: relative;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-.grid-cell:active { transform: scale(0.92); }
-.grid-cell-free { background: var(--free); border-color: var(--free); }
-.grid-cell-maybe { background: var(--maybe); border-color: var(--maybe); }
-.grid-cell-busy { background: var(--surface-dim); }
-/* Colorblind-safe glyphs. High-opacity so ✓/~/✗ read as real non-colour
-   signals at small sizes — not just a subtle tint overlay. */
-.grid-cell-free::after  { content: '✓'; color: rgba(255,255,255,0.90); }
-.grid-cell-maybe::after { content: '~'; color: rgba(26,26,26,0.90); }
-.grid-cell-busy::after  { content: ''; }
-
-.grid-header {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 4px 0;
-}
-
-/* ── VOTE BUTTONS ── */
-.vote-btn {
-  flex: 1;
-  padding: 14px 10px;
-  border-radius: var(--radius-md);
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
-  border: 2px solid var(--border-light);
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.vote-keen { border-color: var(--free); background: var(--free-light); color: #1a7a3a; }
-.vote-meh { border-color: var(--maybe); background: var(--maybe-light); color: #8a6d10; }
-.vote-nah { border-color: var(--error); background: #fef2f2; color: var(--error); }
-
-/* ── SYNTHESIS CARD ── */
-.synthesis-card {
-  background: var(--surface);
-  border: 2px solid var(--accent);
-  border-radius: var(--radius-xl);
-  padding: 28px;
-  position: relative;
-}
-.synthesis-card::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: 24px;
-  right: 24px;
-  height: 3px;
-  background: var(--accent);
-  border-radius: 0 0 2px 2px;
-}
-
-/* ── SECTION GROUP ── */
-.section-group {
-  margin-bottom: 12px;
-}
-.section-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 0;
-  cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid var(--border-light);
-  margin-bottom: 16px;
-}
-.section-group-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.section-group-chevron {
-  width: 16px;
-  height: 16px;
-  color: var(--text-muted);
-  transition: transform 0.2s ease;
-}
-.section-group-chevron-open {
-  transform: rotate(180deg);
-}
-.section-group-body {
-  overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.2s ease;
-}
-.section-group-collapsed {
-  max-height: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* ── STICKY BAR ── */
-/* Solid fill — no glassmorphism (brief explicitly bans backdrop-blur). */
-.sticky-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
-  background: var(--bg);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
-  z-index: 100;
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-.sticky-bar .btn-primary {
-  max-width: 520px;
-  flex: 1;
-}
-.sticky-bar .btn-secondary {
-  flex: 1;
-}
-
-/* Pages that mount a fixed sticky-bar need bottom breathing room so the
-   last bit of content isn't hidden behind the floating button on short
-   viewports. Add this class to the outermost scrollable container. */
-.has-sticky-bar {
-  padding-bottom: calc(96px + env(safe-area-inset-bottom));
-}
-
-/* ── MOBILE RESPONSIVE ── */
-@media (max-width: 480px) {
-  .section-title {
-    font-size: 22px;
-  }
-
-  .btn-primary {
-    padding: 14px 20px;
-    font-size: 15px;
-  }
-
-  .btn-secondary {
-    padding: 12px 16px;
-    font-size: 14px;
-  }
-
-  .input {
-    padding: 12px 14px;
-    font-size: 15px;
-  }
-
-  .chip {
-    padding: 8px 14px;
-    font-size: 13px;
-  }
-
-  .grid-cell {
-    width: 44px;
-    height: 44px;
-    border-radius: 6px;
-    font-size: 13px;
-  }
-
-  .vote-btn {
-    padding: 12px 8px;
-    font-size: 14px;
-  }
-
-  .synthesis-card {
-    padding: 20px;
-    border-radius: var(--radius-lg);
-  }
-
-  .card {
-    border-radius: var(--radius-md);
-  }
-
-  .sticky-bar {
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  }
-
-  .label {
-    font-size: 10px;
-  }
-
-  .section-group-header {
-    padding: 8px 0;
-  }
-
-  /* Stack demo cards vertically on mobile */
-  .demo-cards-container {
-    flex-direction: column !important;
-    align-items: center !important;
-  }
-  .demo-cards-container > div {
-    width: 100% !important;
-    max-width: 320px !important;
-  }
-
-  /* Better tap targets for participant chips */
-  .sticky-bar .btn-primary,
-  .sticky-bar .btn-secondary {
-    font-size: 14px;
-    padding: 12px 16px;
-  }
-}
-
-/* Grid scroll hint — fade on right edge */
-.grid-scroll-container {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.grid-scroll-container::-webkit-scrollbar {
-  display: none;
-}
-
-/* ── SKELETON LOADERS ──
-   Shown while a first-paint fetch is in flight (e.g. /state on the results
-   page, /api/hangs on the landing). Keeps the layout from flashing blank. */
-@keyframes skeleton-shimmer {
-  0%   { background-position: -200px 0; }
-  100% { background-position: calc(200px + 100%) 0; }
-}
-.skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--surface-dim) 0%,
-    var(--surface-hover) 40%,
-    var(--surface-dim) 80%
-  );
-  background-size: 200px 100%;
-  background-repeat: no-repeat;
-  animation: skeleton-shimmer 1.2s ease-in-out infinite;
-  border-radius: var(--radius-sm);
+/* Sheets open over the poster and go back to plain black on white. */
+.poster dialog {
+  --color-bg: #FFFFFF; --color-surface: #FFFFFF; --color-sunken: #F1F1EE; --color-hover: #E8E8E4;
+  --color-ink: #111111; --color-ink-2: #454545; --color-ink-3: #666666;
+  --color-line: #E2E2DE; --color-line-strong: #BDBDB8; --color-control-border: #858580;
+  --color-accent: #F5B700; --color-accent-press: #DFA600; --color-on-accent: #111111;
+  --color-free: #0B5D3F; --color-free-ink: #0B5D3F; --color-free-bg: #DFF0E9; --color-on-free: #FFFFFF;
+  --color-maybe: #8A5A00; --color-maybe-ink: #6B4600; --color-maybe-bg: #FBEFD0;
+  --color-cant: #666666; --color-cant-ink: #454545; --color-cant-bg: #ECECE8; --color-on-cant: #FFFFFF;
+  --color-danger: #B42318; --color-danger-bg: #FCEBE9; --color-white: #FFFFFF;
 }
 @media (prefers-reduced-motion: reduce) {
-  .skeleton { animation: none; background: var(--surface-dim); }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
-
-/* ── COMMITMENT PILL (big, weighty) ──
-   The three-tier commit is the product's moat. Make it feel like a real
-   decision — tap target well above 44px, scale-down on press, bold ring
-   on the selected state so the chosen answer feels locked in. */
-.commit-pill {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 20px 22px;
-  min-height: 72px;
-  background: var(--surface);
-  border: 2px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-  text-align: left;
-  transition: transform 0.12s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-  width: 100%;
-  font-family: inherit;
-}
-.commit-pill:hover { background: var(--surface-dim); }
-.commit-pill:active { transform: scale(0.985); }
-.commit-pill-selected {
-  box-shadow: 0 0 0 4px rgba(245, 200, 66, 0.18), var(--shadow-md);
-  transform: translateY(-1px);
-}
-@media (max-width: 480px) {
-  .commit-pill {
-    padding: 18px 18px;
-    min-height: 68px;
-  }
-}
-

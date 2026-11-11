@@ -1,328 +1,126 @@
-// Zod schemas for every mutation endpoint. Keep limits tight — these fields
-// are user-supplied and go straight into the DB; the server is the only place
-// we can enforce them. Update the limits table in the plan if these change.
-
+// Zod v4 request schemas for the v2 API, with text cleaning (NFKC, invisible/bidi stripping, whitespace collapse).
 import { z } from 'zod'
+import { isRealCalendarDate, isValidTimeZone } from './dates'
 
-// ── primitives ──
-const ShortText = (max: number) =>
-  z.string().trim().min(1, 'Required').max(max, `Too long (max ${max})`)
-const OptionalShortText = (max: number) =>
-  z.string().trim().max(max).optional().or(z.literal(''))
-const HangId = z.string().min(4).max(32)
-const ParticipantId = z.string().min(4).max(64)
-const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date')
-const Hour = z.number().int().min(0).max(23)
+// Strips every control (Cc), format (Cf: zero-width, bidi marks/embeddings/overrides/isolates, soft hyphen, BOM,
+// tag characters) and line/paragraph separator, plus code points that are not Cf but render blank: the combining
+// grapheme joiner, variation selectors (including the Mongolian free variation selectors U+180B-U+180F), the Hangul
+// fillers (letters that render blank), the Khmer inherent vowels U+17B4/U+17B5, the Braille blank U+2800, the musical
+// null notehead U+1D159 and the Khitan small script filler U+16FE4. The zero-width joiner and VS16 survive only inside
+// emoji sequences (see keepInEmoji). Visible-width spaces (U+2000-U+200A, U+3000, ...) are whitespace and collapse.
+const STRIP = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180F\u2800\u3164\uFFA0\uFE00-\uFE0F\u{16FE4}\u{1D159}\u{E0100}-\u{E01EF}]/gu
+const PICTO = /^\p{Extended_Pictographic}$/u
+const SKIN = /^[\u{1F3FB}-\u{1F3FF}]$/u
+const ZWJ = '\u200D'
+const VS16 = '\uFE0F'
 
-// Location: allow plain text OR http/https URLs — reject javascript:/data:/etc.
-const SafeLocation = z
-  .string()
-  .trim()
-  .max(200)
-  .refine(v => !/^javascript:/i.test(v) && !/^data:/i.test(v) && !/^vbscript:/i.test(v), 'Unsafe URL')
-  .optional()
-  .or(z.literal(''))
+// The code point ending just before index i (surrogate-pair aware).
+function cpBefore(str: string, i: number): string {
+  if (i <= 0) return ''
+  const lo = str.charCodeAt(i - 1)
+  return i >= 2 && lo >= 0xdc00 && lo <= 0xdfff ? str.slice(i - 2, i) : str.slice(i - 1, i)
+}
+const cpAt = (str: string, i: number) => String.fromCodePoint(str.codePointAt(i) ?? 0)
 
-// ── POST /api/hangs ──
-export const CreateHangSchema = z.object({
-  name: ShortText(120),
-  creatorName: ShortText(50),
-  dateMode: z.enum(['range', 'specific']).default('range'),
-  dateRangeStart: DateStr.optional(),
-  dateRangeEnd: DateStr.optional(),
-  selectedDates: z.array(DateStr).max(31).optional(),
-  activities: z
-    .array(
-      z.union([
-        ShortText(60),
-        z.object({
-          name: ShortText(60),
-          costEstimate: OptionalShortText(40),
-        }),
-      ]),
-    )
-    .max(50)
-    .optional(),
-  template: OptionalShortText(40),
-  location: SafeLocation,
-  duration: z.number().int().min(1).max(24).default(2),
-  // How precise we ask responders to be about their availability. Blocks =
-  // morning/afternoon/evening/night (4 pills per day, thumb-friendly).
-  // Hourly = the per-hour drag grid (when creators need real precision).
-  timeGranularity: z.enum(['blocks', 'hourly']).optional(),
-  // Phase 2 Extras — all optional creator-seeded fields
-  description: OptionalShortText(300),
-  theme: OptionalShortText(60),
-  dressCode: OptionalShortText(60),
-  responseDeadline: DateStr.optional(),
-  askDietary: z.boolean().optional(),
-  customQuestion: OptionalShortText(200),
-  bringListSeed: z.array(ShortText(100)).max(20).optional(),
-  // Crew-scoped hang: when set, creator must be a member of this crew and
-  // hangs.crew_id is populated so crew views can roll this hang up.
-  crewId: z.string().min(4).max(32).optional(),
-})
-
-// ── POST /api/hangs/[id]/join ──
-// Name is optional when the caller is a logged-in crew member — the server
-// pulls display_name + dietary from their crew profile in that case.
-export const JoinSchema = z.object({
-  name: ShortText(50).optional(),
-})
-
-// ── POST /api/hangs/[id]/send-link ── email the creator their own link
-export const SendLinkSchema = z.object({
-  email: z.string().trim().email('Enter a valid email').max(200),
-})
-
-// ── POST /api/hangs/[id]/availability ──
-// Also accepts an optional commitment field — the respond-flow submits both
-// together in the final step, so we save a round-trip by bundling them.
-export const AvailabilitySchema = z.object({
-  slots: z
-    .array(
-      z.object({
-        date: DateStr,
-        hour: Hour,
-        status: z.enum(['free', 'maybe', 'busy']),
-      }),
-    )
-    .max(500),
-  commitment: z.enum(['in', 'probably', 'cant']).optional(),
-  dietary: OptionalShortText(60),
-  customAnswer: OptionalShortText(300),
-})
-
-// ── POST /api/hangs/[id]/vote ──
-export const VoteSchema = z.object({
-  // bulk shape (preferred) OR legacy single-vote shape
-  votes: z
-    .array(
-      z.object({
-        activityId: z.number().int().positive(),
-        vote: z.enum(['up', 'meh', 'down']),
-      }),
-    )
-    .max(100)
-    .optional(),
-  activityId: z.number().int().positive().optional(),
-  vote: z.enum(['up', 'meh', 'down']).optional(),
-})
-
-// ── POST /api/hangs/[id]/comments ──
-export const CommentSchema = z.object({
-  text: ShortText(500),
-})
-
-// ── POST /api/hangs/[id]/transport ──
-export const TransportSchema = z.object({
-  mode: z.enum(['driving', 'need_ride', 'own_way']),
-  seats: z.number().int().min(0).max(20).optional(),
-})
-
-// ── POST /api/hangs/[id]/photos ──
-export const PhotoSchema = z.object({
-  data: z.string().min(10).max(6_000_000),
-  caption: OptionalShortText(200),
-})
-
-// ── POST /api/hangs/[id]/bring-list ──
-export const BringListSchema = z.discriminatedUnion('action', [
-  z.object({
-    action: z.literal('add'),
-    item: ShortText(100),
-    parentId: z.number().int().positive().nullable().optional(),
-  }),
-  z.object({
-    action: z.literal('claim'),
-    itemId: z.number().int().positive(),
-    note: OptionalShortText(100),
-  }),
-  z.object({
-    action: z.literal('unclaim'),
-    itemId: z.number().int().positive(),
-  }),
-  z.object({
-    action: z.literal('remove'),
-    itemId: z.number().int().positive(),
-  }),
-])
-
-// ── POST /api/hangs/[id]/expenses ──
-export const ExpenseSchema = z.object({
-  description: ShortText(120),
-  amount: z.number().positive().max(1_000_000),
-  splitBetween: z.array(z.string()).max(50).optional(),
-})
-
-// ── POST /api/hangs/[id]/polls ──
-export const PollsSchema = z.discriminatedUnion('action', [
-  z.object({
-    action: z.literal('create'),
-    question: ShortText(200),
-    options: z.array(ShortText(60)).min(2).max(10),
-  }),
-  z.object({
-    action: z.literal('vote'),
-    optionId: z.number().int().positive(),
-  }),
-])
-
-// ── POST /api/hangs/[id]/rsvp ──
-export const RsvpSchema = z.object({
-  status: z.enum(['going', 'maybe', 'cant']),
-})
-
-// ── POST /api/hangs/[id]/commitment ──
-export const CommitmentSchema = z.object({
-  level: z.enum(['in', 'probably', 'cant']),
-  dietary: OptionalShortText(60),
-  customAnswer: OptionalShortText(300),
-})
-
-// ── PATCH /api/hangs/[id] ──  creator-only editable fields
-// Dates ARE editable: send a full date spec (dateMode + range or selectedDates).
-// The route revalidates the combo and prunes availability for any removed dates.
-export const EditHangSchema = z
-  .object({
-    name: ShortText(120).optional(),
-    description: OptionalShortText(300),
-    theme: OptionalShortText(60),
-    dressCode: OptionalShortText(60),
-    location: SafeLocation,
-    customQuestion: OptionalShortText(200),
-    askDietary: z.boolean().optional(),
-    responseDeadline: DateStr.optional().or(z.literal('')),
-    dateMode: z.enum(['range', 'specific']).optional(),
-    dateRangeStart: DateStr.optional(),
-    dateRangeEnd: DateStr.optional(),
-    selectedDates: z.array(DateStr).max(31).optional(),
-  })
-  .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
-
-// ── POST /api/hangs/[id]/activities ──
-export const AddActivitySchema = z.object({
-  name: ShortText(60),
-  costEstimate: OptionalShortText(40),
-})
-
-// ── POST /api/hangs/[id]/settings ──
-export const SettingsSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('lock') }),
-  z.object({ action: z.literal('unlock') }),
-  z.object({ action: z.literal('cancel') }),
-  z.object({ action: z.literal('uncancel') }),
-])
-
-// ── POST /api/hangs/[id]/reactions ──
-export const ReactionSchema = z.object({
-  emoji: ShortText(40),
-})
-
-// ── POST /api/hangs/[id]/confirm ──
-// Three modes: unconfirm (creator), force-confirm (creator override), or cast a vote (guest)
-export const ConfirmSchema = z.union([
-  z.object({ action: z.literal('unconfirm') }),
-  z.object({
-    action: z.literal('force'),
-    date: DateStr,
-    hour: Hour,
-    activityName: OptionalShortText(60),
-  }),
-  z.object({
-    vote: z.enum(['yes', 'no']).optional(),
-    date: DateStr.optional(),
-    hour: Hour.optional(),
-    activityName: OptionalShortText(60),
-  }),
-])
-
-// ── DELETE /api/hangs/[id]/participants ──
-export const ParticipantDeleteSchema = z.object({
-  targetParticipantId: ParticipantId.optional(), // optional = self-delete
-})
-
-// ── Crew pivot schemas ──
-
-const Email = z.string().trim().toLowerCase().email('Invalid email').max(200)
-
-// POST /api/auth/request-magic-link
-export const RequestMagicLinkSchema = z.object({
-  email: Email,
-  // Optional redirect after verification (must be a relative path to prevent open-redirect)
-  redirect: z
-    .string()
-    .max(300)
-    .regex(/^\/[^/]/, 'Must be a relative path')
-    .optional(),
-})
-
-// POST /api/crews
-export const CreateCrewSchema = z.object({
-  name: ShortText(80),
-  description: OptionalShortText(400),
-  inviteEmails: z.array(Email).max(50).optional(),
-})
-
-// PATCH /api/crews/[id]
-export const UpdateCrewSchema = z
-  .object({
-    name: ShortText(80).optional(),
-    description: OptionalShortText(400),
-    slug: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .regex(/^[a-z0-9-]{2,40}$/, 'Slug must be 2-40 chars: lowercase letters, numbers, hyphens')
-      .optional(),
-    // Recurring rule: "weekly:dow:hour" or "biweekly:dow:hour". Empty string clears.
-    // dow = mon|tue|wed|thu|fri|sat|sun, hour = 0-23
-    recurringRule: z
-      .string()
-      .regex(/^(?:|(?:weekly|biweekly):(?:mon|tue|wed|thu|fri|sat|sun):(?:[0-9]|1[0-9]|2[0-3]))$/, 'Invalid recurring rule')
-      .optional(),
-    recurringTemplateHangId: z.string().min(4).max(32).optional(),
-    coverColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Color must be #RRGGBB').optional().or(z.literal('')),
-    coverEmoji: z.string().max(8).optional().or(z.literal('')),
-  })
-  .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
-
-// POST /api/crews/[id]/members
-export const InviteMembersSchema = z.object({
-  emails: z.array(Email).min(1).max(50),
-})
-
-// PATCH /api/crews/[id]/members/[userId]
-export const UpdateMemberProfileSchema = z
-  .object({
-    displayName: ShortText(60).optional(),
-    dietary: OptionalShortText(60),
-    transportPreference: z
-      .enum(['own_way', 'driving', 'need_ride', 'passenger', 'none'])
-      .optional(),
-    contactPhone: OptionalShortText(40),
-    notes: OptionalShortText(400),
-    role: z.enum(['exec', 'member']).optional(),
-    // Availability shape: weekday+hour → status. Bounded to prevent abuse.
-    availabilityShape: z
-      .record(z.string().regex(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\|\d{1,2}$/), z.enum(['free', 'maybe', 'busy']))
-      .optional(),
-  })
-  .refine(v => Object.values(v).some(x => x !== undefined), 'No fields to update')
-
-// POST /api/crews/[id]/hangs — same as CreateHangSchema but scoped to crew
-// (crew context is inferred from the path, not the body, so schema is reused)
-
-// Helper: run a schema.safeParse and return either the data or a 400 NextResponse.
-export function parseBody<T extends z.ZodTypeAny>(
-  body: unknown,
-  schema: T,
-): { data: z.infer<T> } | { error: string } {
-  const result = schema.safeParse(body)
-  if (!result.success) {
-    const first = result.error.issues[0]
-    const path = first.path.join('.')
-    return { error: path ? `${path}: ${first.message}` : first.message }
+// Emoji sequences keep their glue: a zero-width joiner between two pictographs (after an optional skin tone or VS16),
+// as in a family or a rainbow flag, and VS16 right after a pictograph. Anywhere else both are stripped like the rest.
+function keepInEmoji(str: string, ch: string, i: number): boolean {
+  if (ch !== ZWJ && ch !== VS16) return false
+  let j = i
+  let prev = cpBefore(str, j)
+  if (ch === ZWJ) {
+    while (prev === VS16 || SKIN.test(prev)) {
+      j -= prev.length
+      prev = cpBefore(str, j)
+    }
+    return PICTO.test(prev) && PICTO.test(cpAt(str, i + 1))
   }
-  return { data: result.data }
+  return PICTO.test(prev)
+}
+
+export const clean = (s: string) => s.normalize('NFKC').replace(/[\t\n\r\f\v]/g, ' ')
+  .replace(STRIP, (ch, i: number, str: string) => (keepInEmoji(str, ch, i) ? ch : ''))
+  .replace(/\s+/g, ' ').trim()
+// Cyrillic, Greek and Latin letters that render like a different Latin letter (a small UTS #39-style skeleton table).
+// Case-specific where only one case looks Latin (Cyrillic capital Н is H, lowercase н is not h).
+const CONFUSABLES: Record<string, string> = {
+  // Cyrillic capitals
+  'А': 'A', 'В': 'B', 'Е': 'E', 'Ѕ': 'S', 'І': 'I', 'Ј': 'J', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P',
+  'С': 'C', 'Т': 'T', 'Х': 'X', 'У': 'Y', 'Ү': 'Y', 'Ԛ': 'Q', 'Ԝ': 'W', 'Ӏ': 'I',
+  // Cyrillic lowercase
+  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x', 'і': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd',
+  'һ': 'h', 'ԛ': 'q', 'ԝ': 'w', 'ӏ': 'l', 'ү': 'y', 'к': 'k',
+  // Greek capitals
+  'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H', 'Ι': 'I', 'Κ': 'K', 'Μ': 'M', 'Ν': 'N', 'Ο': 'O', 'Ρ': 'P',
+  'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
+  // Greek lowercase
+  'α': 'a', 'ο': 'o', 'ν': 'v', 'ρ': 'p', 'ι': 'i', 'κ': 'k', 'τ': 't', 'υ': 'u', 'ϲ': 'c', 'ϳ': 'j',
+  // Latin lookalikes that NFKC keeps (dotless i and j, script a and g)
+  'ı': 'i', 'ȷ': 'j', 'ɑ': 'a', 'ɡ': 'g', 'ɩ': 'i',
+}
+const CONFUSABLE_RE = new RegExp(`[${Object.keys(CONFUSABLES).join('')}]`, 'gu')
+// Combining diacritics used on Latin, Greek and Cyrillic letters (not other scripts' vowel signs, which carry meaning).
+const DIACRITICS = /[̀-ͯ҃-҉᪰-᫿᷀-᷿⃐-⃿︠-︯]/gu
+const fold = (s: string) => s.replace(CONFUSABLE_RE, ch => CONFUSABLES[ch] ?? ch)
+
+// Per-event name uniqueness key: a confusable skeleton of the cleaned name. Diacritics drop (so İ is I and é is e),
+// lookalike Cyrillic/Greek letters and ı become their Latin twins, then case folds. Two names with the same key would
+// look the same in the people list, so the second is refused as name_taken. Folded twice so a capital whose
+// lowercase is the lookalike (Ү, Ԁ) is caught too.
+export const nameKey = (name: string) =>
+  fold(fold(clean(name).normalize('NFD').replace(DIACRITICS, '')).toLocaleLowerCase('en'))
+const uniq = (a: string[]) => new Set(a).size === a.length
+
+export const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date.').refine(isRealCalendarDate, 'That date does not exist.')
+export const Title = z.string().transform(clean).pipe(z.string().min(1, 'Add a title.').max(60, 'Keep the title to 60 characters.'))
+export const Note = z.string().transform(clean).pipe(z.string().max(140, 'Keep the note to 140 characters.'))
+export const Name = z.string().transform(clean).pipe(
+  z.string().min(1, 'Add your name.').regex(/[\p{L}\p{N}]/u, 'Names need at least one letter or number.')
+    // Characters as people count them (code points), matching the name inputs' counter: an emoji is one, not two.
+    .refine(s => Array.from(s).length <= 40, 'Keep names to 40 characters.'),
+)
+export const Place = z.string().transform(clean).pipe(z.string().max(80, 'Keep the place to 80 characters.'))
+  .refine(s => !/^(javascript|data|vbscript):/i.test(s), 'That place is not allowed.')
+export const Time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 13:30.')
+export const TimeZone = z.string().max(64).refine(isValidTimeZone, 'Unknown timezone.')
+export const AnswerValueSchema = z.enum(['free', 'maybe', 'cant'])
+export const OptionKind = z.enum(['date'])   // enforced here, not by a DB CHECK
+export const OptionId = z.string().regex(/^[a-z0-9]{8}$/)
+export const AnswerUpdate = z.object({ optionId: OptionId, value: AnswerValueSchema.nullable() })
+
+const Dates = z.array(DateStr).min(1, 'Pick at least one day.').max(62, "That's the max: 62 days.").refine(uniq, 'Each day can only be picked once.')
+
+export const CreateEventInput = z.object({
+  title: Title,
+  note: Note.default(''),
+  organiserName: Name,
+  mode: z.enum(['days', 'parts']).default('days'),
+  dates: Dates,
+  tz: TimeZone.default('Australia/Sydney'),
+})
+export const PatchEventInput = z.object({ title: Title.optional(), note: Note.optional() })
+  .refine(o => o.title !== undefined || o.note !== undefined, 'Nothing to change.')
+export const SetDatesInput = z.object({ dates: Dates })   // parts-mode x3 cap checked in the repository
+export const JoinInput = z.object({ name: Name, answers: z.array(AnswerUpdate).max(62).default([]) })
+export const RenameInput = z.object({ name: Name })
+export const SaveAnswersInput = z.object({ answers: z.array(AnswerUpdate).min(1).max(62) })
+export const LockInput = z.object({ optionId: OptionId, time: Time.nullable().default(null), place: Place.default('') })
+
+export type CreateEventInputT = z.output<typeof CreateEventInput>
+export type PatchEventInputT = z.output<typeof PatchEventInput>
+export type SetDatesInputT = z.output<typeof SetDatesInput>
+export type JoinInputT = z.output<typeof JoinInput>
+export type RenameInputT = z.output<typeof RenameInput>
+export type SaveAnswersInputT = z.output<typeof SaveAnswersInput>
+export type LockInputT = z.output<typeof LockInput>
+
+// First human-readable zod issue message, for 400 responses.
+export function firstIssueMessage(error: z.ZodError): string {
+  const issue = error.issues[0]
+  if (!issue) return "Something in that request wasn't right."
+  if (issue.code === 'invalid_type' || issue.message.startsWith('Invalid')) {
+    const field = issue.path.join('.') || 'request'
+    return `Check the ${field} and try again.`
+  }
+  return issue.message
 }
